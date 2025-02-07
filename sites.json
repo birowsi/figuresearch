@@ -1,8 +1,11 @@
 {
     "UTF-8": [
-        {"name": "애니메이트코리아 온라인샵", "url": "https://www.animate-onlineshop.co.kr/goods/goods_search.php?keyword={input}"},
-        {"name": "메가하우스", "url": "https://smartstore.naver.com/megahousestore/search?q={input}"},
+        {"name": "애니메이트코리아", "url": "https://www.animate-onlineshop.co.kr/goods/goods_search.php?keyword={input}"},
+        {"name": "메가하우스PW", "url": "https://smartstore.naver.com/megahousestore/search?q={input}"},
+		{"name": "메가하우스BH", "url": "https://brand.naver.com/megahousemall/search?q={input}"},
         {"name": "굿스마일코리아", "url": "https://brand.naver.com/goodsmilekr/search?q={input}"},
+		{"name": "굿스마일BH", "url": "https://smartstore.naver.com/gsc_korea_dt_bh/search?q={input}"},
+		{"name": "굿스마일PW", "url": "https://smartstore.naver.com/gsc_korea_dt_pw/search?q={input}"},
         {"name": "코믹존", "url": "https://www.comiczone.co.kr/goods/goods_search.php?keyword={input}"},
         {"name": "코믹시티", "url": "https://www.comicct.com/shop/search_result.php?search_str={input}"},
         {"name": "북컬쳐", "url": "https://www.bookculture.co.kr/product/search.html?banner_action=&keyword={input}"},
@@ -12,7 +15,7 @@
         {"name": "이딴가게", "url": "https://ittanstore.com/product/search.html?banner_action=&keyword={input}"},
         {"name": "코믹스아트", "url": "https://comics-art.co.kr/shopSearch/search.html?query={input}"},
         {"name": "히어로타임", "url": "https://herotime.co.kr/product/search.html?banner_action=&keyword={input}"},
-        {"name": "오라오라 피규어", "url": "https://oraora.kr/product/search.html?banner_action=&keyword={input}"},
+        {"name": "오라오라", "url": "https://oraora.kr/product/search.html?banner_action=&keyword={input}"},
         {"name": "도키도키굿즈", "url": "https://dokidokigoods.co.kr/product/search.html?banner_action=&keyword={input}"},
         {"name": "매니아하우스", "url": "https://maniahouse.co.kr/product/search.html?banner_action=&keyword={input}"},
         {"name": "호비랜드푸치", "url": "https://hobbylandpuch.com/product/search.html?banner_action=&keyword={input}"},
@@ -23,13 +26,13 @@
         {"name": "모리무리", "url": "https://morimuri.co.kr/product/search.html?banner_action=&keyword={input}"},
         {"name": "피규어세일러", "url": "https://figuresailer.com/product/search.html?banner_action=&keyword={input}"},
         {"name": "페간샵", "url": "https://smartstore.naver.com/pjh_2019/search?q={input}"},
-        {"name": "굿스마일PW", "url": "https://smartstore.naver.com/gsc_korea_dt_pw/search?q={input}"},
         {"name": "알라딘", "url": "https://www.aladin.co.kr/search/wsearchresult.aspx?SearchTarget=All&SearchWord={input}"},
-        {"name": "예스24", "url": "https://www.yes24.com/Product/Search?domain=ALL&query={input}"}
+        {"name": "예스24", "url": "https://www.yes24.com/Product/Search?domain=ALL&query={input}"},
+		{"name": "하비다모아", "url": "https://hobbydamoa.com/product/search.html?banner_action=&keyword={input}"},
+		{"name": "번개장터", "url": "https://m.bunjang.co.kr/search/products?q={input}"}
     ],
     "EUC-KR": [
         {"name": "천사건담", "url": "https://www.1004gundam.co.kr/mall/search.php?q={input}"},
-        {"name": "논노21", "url": "http://nonno21.com/shop/goods/goods_search.php?searched=Y&skey=all&sword={input}"},
-        {"name": "베스트하비", "url": "http://besthobby.kr/coding/shop.asp?q={input}"}
+        {"name": "논노21", "url": "http://nonno21.com/shop/goods/goods_search.php?searched=Y&skey=all&sword={input}"}
     ]
 }
