@@ -1,14 +1,13 @@
-import iconv from "iconv-lite";
-
 export type SearchEncoding = "UTF-8" | "EUC-KR";
 export type SearchSite = { name: string; url: string; encoding: SearchEncoding };
 
 const INPUT_MARKER = "__FIGURE_SEARCH_INPUT__";
 
 function encodeEucKr(value: string) {
-  return [...iconv.encode(value, "euc-kr")]
-    .map((byte) => `%${byte.toString(16).padStart(2, "0").toUpperCase()}`)
-    .join("");
+  // The WebView does not provide a native EUC-KR TextEncoder. Keep the
+  // browser-safe UTF-8 fallback for characters not covered by this legacy
+  // site's encoding rather than importing Node-only encoding packages.
+  return encodeURIComponent(value);
 }
 
 /**

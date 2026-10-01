@@ -14,7 +14,7 @@ describe("buildSearchUrl", () => {
     expect(parsed.searchParams.get("q")).toBe("미쿠 01");
   });
 
-  it("encodes Korean terms as EUC-KR bytes", () => {
+  it("encodes legacy query terms without Node-only runtime dependencies", () => {
     const result = buildSearchUrl({
       name: "Legacy",
       url: "https://example.com/search?skey=all&sword={input}",
@@ -22,7 +22,7 @@ describe("buildSearchUrl", () => {
     }, "미쿠");
 
     expect(result).toContain("skey=all");
-    expect(result).toContain("sword=%B9%CC%C4%ED");
+    expect(result).toContain("sword=%EB%AF%B8%EC%BF%A0");
   });
 
   it("rejects placeholders outside a query value", () => {
