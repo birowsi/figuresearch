@@ -4,6 +4,8 @@
   "description": "여러 피규어 판매처를 한 번에 검색하는 데스크톱 앱",
   "scripts": {
     "test": "npm run validate:sites && vitest run",
+    "test:core": "cargo test --manifest-path src-tauri/Cargo.toml --workspace",
+    "test:all": "npm test && npm run test:core",
     "validate:sites": "node scripts/validate-sites.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",

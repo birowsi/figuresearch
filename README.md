@@ -1,6 +1,6 @@
 # FigureSearch
 
-수동으로 수집한 국내 피규어 판매처를 한 번에 검색하는 Windows 데스크톱 앱입니다. 검색어를 입력하고 판매처를 선택하면 각 사이트의 검색 결과가 외부 브라우저 탭으로 열립니다.
+국내 피규어 판매처 여러 곳을 한 번에 검색해서, 결과를 앱 안에 모아 보여 주는 Windows 데스크톱 앱입니다. 상품이나 판매처를 누를 때만 외부 브라우저가 열립니다.
 
 ## 실행
 
@@ -11,7 +11,66 @@ npm install
 npm run tauri dev
 ```
 
-개발 중에는 `npm run dev`로 웹 UI만 확인할 수 있고, 사이트 설정 형식은 `npm test`로 검증합니다. 데스크톱의 실제 외부 링크 열기와 Rust 상태 확인은 `npm run tauri dev`에서 테스트합니다. 앱이 시작되면 각 검색 경로에 테스트 검색어를 보내 상태를 확인하며, 이는 판매처의 검색 결과나 상품 데이터를 검증하는 것이 아니라 주소와 네트워크 응답만 확인합니다.
+## 테스트
+
+```bash
+npm test            # sites.json 검증 + 프론트 필터/정렬 테스트
+npm run test:core   # Rust: HTML 추출 · 관련도 · 상품 분류 · 백엔드 테스트
+npm run test:all    # 둘 다
+```
+
+## 구조
+
+```
+src/                      React UI (결과 표시, 분류 필터, 판매처 선택)
+src-tauri/src/lib.rs      Tauri 명령: 판매처 요청, 문자셋 디코딩, 번개장터 API, 결과 스트리밍
+src-tauri/search-core/    검색 핵심 로직 (외부 의존성 없음)
+  src/html.rs             망가진 HTML도 읽는 관대한 파서
+  src/extract.rs          쇼핑몰 플랫폼별 상품 카드 추출 (Cafe24, 고도몰, 메이크샵, 영카트, 아임웹, 알라딘, 예스24, 범용)
+  src/query.rs            검색어 분석, 판매처별 검색어 후보, 관련도 판정
+  src/classify.rs         상품 분류(넨도로이드, figma, 스케일, 프라이즈 …)와 예약·중고·특전 태그
+  data/aliases.txt        검색 별칭(한·일·영 표기, 약칭) — 직접 추가할 수 있어요
+sites.json                판매처 목록
+```
+
+### 검색 흐름
+
+1. 검색어를 분석해 단어 묶음을 만듭니다. `하츠네 미쿠`·`初音ミク`·`Hatsune Miku`·`미쿠`는 같은 묶음, `2301`·`1/7`·JAN 코드는 꼭 맞아야 하는 식별자, `피규어`·`정품`·제조사 이름은 선택 단어로 다룹니다.
+2. 판매처마다 원래 검색어로 먼저 검색하고, 맞는 상품이 없으면 다른 후보(한국어 표기, 선택 단어를 뺀 검색어)로 한 번 더 시도합니다.
+3. 페이지에서 검색 결과 영역만 골라 상품 카드를 읽습니다. 헤더·메뉴·추천상품·배너 링크는 제외하고, 소비자가·적립금 대신 실제 판매가를 읽습니다.
+4. 상품명에 검색어가 실제로 들어 있는지 판정합니다. 맞지 않는 상품은 숨기고, "관련 낮은 결과 보기"로 확인할 수 있습니다(없는 단어 표시).
+5. 상품을 종류별로 분류하고 예약·중고·특전·재판·비정품 의심 태그와 발매월을 붙입니다.
+
+같은 서버에는 동시에 요청하지 않고, 판매처 하나가 실패해도 다른 판매처 결과는 계속 표시됩니다.
+
+## 판매처 데이터 수정
+
+`sites.json`이 판매처 목록의 원본입니다. `UTF-8` 또는 `EUC-KR` 그룹 안에 `name`과 `{input}` 자리표시자가 들어간 `url`을 추가합니다. 쇼핑몰 플랫폼은 URL에서 자동으로 판별하며, 필요하면 직접 지정할 수 있습니다.
+
+```json
+{"name": "어떤샵", "url": "https://example.com/product/search.html?keyword={input}", "platform": "cafe24",
+ "profile": {"preferredLanguage": "japanese", "eucKrFallback": "UTF-8"}}
+```
+
+- `platform`: `cafe24`, `godomall`, `makeshop`, `youngcart`, `imweb`, `aladin`, `yes24`, `naver_store`, `bunjang`, `generic`
+- `preferredLanguage`: 이 판매처에 먼저 보낼 검색어 표기(`korean`, `japanese`, `english`)
+- `eucKrFallback`: EUC-KR로 표현할 수 없는 글자가 있을 때 `UTF-8`로 보내거나 `skip`(건너뛰기)
+
+## 판매처별 참고
+
+- **네이버 스마트스토어·브랜드스토어**: 화면이 스크립트로 그려지고 자동 요청을 막아서 앱 안에서 검색하지 않습니다. 결과 화면의 판매처 버튼으로 브라우저에서 엽니다.
+- **번개장터**: 공개 검색 API로 결과를 가져오며, 모든 상품에 `중고` 태그가 붙습니다.
+- `429`(요청 제한)는 판매처가 자동 요청을 잠시 막은 것으로, 폐쇄나 URL 변경으로 판단하지 않습니다.
+
+## 판매처 페이지 샘플 저장 (파서 개선용)
+
+개발 모드(`npm run tauri dev`)나 환경 변수 `FIGURESEARCH_DEBUG=1`로 실행하면 각 판매처의 응답 HTML과 분석 결과가 저장됩니다.
+
+```
+%LOCALAPPDATA%\com.birowsi.figuresearch\logs\search-<검색 ID>\<판매처>-<검색어>.html / .json
+```
+
+결과가 이상한 판매처가 있으면 이 파일을 `src-tauri/search-core/tests/fixtures`에 넣고 테스트를 추가하면 됩니다.
 
 ## 배포 빌드
 
@@ -19,18 +78,4 @@ npm run tauri dev
 npm run tauri build
 ```
 
-설치 파일은 `src-tauri/target/release/bundle` 아래에 생성됩니다. Tauri는 ChromeDriver나 별도 Selenium 설치가 필요하지 않습니다.
-
-## 판매처 데이터 수정
-
-`sites.json`이 판매처 데이터의 원본입니다. 기존 형식을 유지하며 `UTF-8` 또는 `EUC-KR` 그룹 안에 `name`과 `{input}` 자리표시자가 포함된 `url`을 추가할 수 있습니다. 판매처 페이지의 검색 URL이 변경되면 이 파일만 수정하면 됩니다.
-
-앱은 사이트 상품 목록을 수집하거나 계정 정보를 다루지 않습니다. 검색 결과는 각 판매처의 정책에 따라 외부 브라우저에서 표시됩니다. 모든 검색 URL 생성은 WebView 호환 코드로 동작하며, 레거시 EUC-KR 설정도 브라우저 안전한 URL 인코딩으로 처리합니다.
-
-일부 네이버 스마트스토어 등은 자동 요청에 `429`(요청 제한)를 반환할 수 있습니다. 이 상태는 폐쇄나 URL 변경으로 단정하지 않고 `제한`으로 표시합니다. 실제 검색은 사용자의 브라우저에서 수행되므로 상태 점검 결과와 다를 수 있습니다.
-
-## 기술 스택
-
-- Tauri 2 + Rust: 가벼운 데스크톱 창과 외부 링크 열기
-- React + TypeScript + Vite: 검색 UI
-- `sites.json`: 사용자가 직접 관리하는 판매처 목록
+설치 파일은 `src-tauri/target/release/bundle` 아래에 생성됩니다.

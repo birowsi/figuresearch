@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 const data = JSON.parse(await readFile(new URL("../sites.json", import.meta.url), "utf8"));
 const errors = [];
+const platforms = ["cafe24", "godomall", "makeshop", "youngcart", "imweb", "aladin", "yes24", "naver_store", "bunjang", "generic"];
+const languages = ["korean", "japanese", "english"];
 const names = new Set();
 
 for (const [encoding, sites] of Object.entries(data)) {
@@ -22,6 +24,16 @@ for (const [encoding, sites] of Object.entries(data)) {
       if (matches.length !== 1) errors.push(`{input} must be a query value: ${site.name}`);
     } catch {
       errors.push(`Invalid URL: ${site.name ?? "(unnamed)"}`);
+    }
+    if (site.platform !== undefined && !platforms.includes(site.platform)) {
+      errors.push(`Unknown platform "${site.platform}" (${platforms.join(", ")}): ${site.name}`);
+    }
+    const profile = site.profile ?? {};
+    if (profile.preferredLanguage !== undefined && !languages.includes(profile.preferredLanguage)) {
+      errors.push(`Unknown preferredLanguage "${profile.preferredLanguage}": ${site.name}`);
+    }
+    if (profile.eucKrFallback !== undefined && !["UTF-8", "skip"].includes(profile.eucKrFallback)) {
+      errors.push(`eucKrFallback must be "UTF-8" or "skip": ${site.name}`);
     }
     names.add(site.name);
   }
