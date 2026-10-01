@@ -25,6 +25,27 @@ describe("buildSearchUrl", () => {
     expect(result).toContain("sword=%EB%AF%B8%EC%BF%A0");
   });
 
+  it("accepts a complete EUC-KR encoding result without mixing encodings", () => {
+    const result = buildSearchUrl({
+      name: "Legacy",
+      url: "https://example.com/search?sword={input}",
+      encoding: "EUC-KR",
+    }, "미쿠", "%B9%CC%C4%ED");
+
+    expect(result).toContain("sword=%B9%CC%C4%ED");
+    expect(result).not.toContain("%EB%AF");
+    expect(result).not.toContain("%25");
+  });
+
+  it("requires an encoder result when an EUC-KR profile explicitly skips fallback", () => {
+    expect(() => buildSearchUrl({
+      name: "Strict legacy",
+      url: "https://example.com/search?q={input}",
+      encoding: "EUC-KR",
+      profile: { eucKrFallback: "skip" },
+    }, "ミク")).toThrow(/encoder result/);
+  });
+
   it("rejects placeholders outside a query value", () => {
     expect(() => buildSearchUrl({
       name: "Invalid",

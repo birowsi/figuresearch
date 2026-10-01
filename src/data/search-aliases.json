@@ -1,0 +1,23 @@
+[
+  {
+    "canonical": "하츠네 미쿠",
+    "korean": ["하츠네 미쿠"],
+    "japanese": ["初音ミク"],
+    "english": ["Hatsune Miku"],
+    "abbreviations": ["미쿠", "Miku"]
+  },
+  {
+    "canonical": "넨도로이드",
+    "korean": ["넨도로이드"],
+    "japanese": ["ねんどろいど"],
+    "english": ["Nendoroid"],
+    "abbreviations": ["넨도", "Nendo"]
+  },
+  {
+    "canonical": "굿스마일",
+    "korean": ["굿스마일", "굿스마일컴퍼니"],
+    "japanese": ["グッドスマイルカンパニー"],
+    "english": ["Good Smile Company"],
+    "abbreviations": ["GSC", "Good Smile"]
+  }
+]

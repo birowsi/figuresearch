@@ -1,14 +1,12 @@
 export type SearchEncoding = "UTF-8" | "EUC-KR";
-export type SearchSite = { name: string; url: string; encoding: SearchEncoding };
+export type SearchSite = {
+  name: string;
+  url: string;
+  encoding: SearchEncoding;
+  profile?: { eucKrFallback?: "UTF-8" | "skip"; preferredLanguage?: "korean" | "japanese" | "english"; shortQuery?: boolean };
+};
 
 const INPUT_MARKER = "__FIGURE_SEARCH_INPUT__";
-
-function encodeEucKr(value: string) {
-  // The WebView does not provide a native EUC-KR TextEncoder. Keep the
-  // browser-safe UTF-8 fallback for characters not covered by this legacy
-  // site's encoding rather than importing Node-only encoding packages.
-  return encodeURIComponent(value);
-}
 
 /**
  * Builds a search URL from a configured URL template.
@@ -17,7 +15,7 @@ function encodeEucKr(value: string) {
  * parameters are parsed and serialized by URLSearchParams instead of being
  * assembled through string replacement.
  */
-export function buildSearchUrl(site: SearchSite, term: string) {
+export function buildSearchUrl(site: SearchSite, term: string, encodedEucKrTerm?: string) {
   const matches = site.url.match(/\{input\}/g)?.length ?? 0;
   if (matches !== 1) {
     throw new Error(`${site.name}: URL must contain exactly one {input} placeholder`);
@@ -36,7 +34,10 @@ export function buildSearchUrl(site: SearchSite, term: string) {
     return parsed.toString();
   }
 
-  const encodedTerm = encodeEucKr(term);
+  if (site.profile?.eucKrFallback === "skip" && !encodedEucKrTerm) {
+    throw new Error(`${site.name}: EUC-KR query requires an encoder result`);
+  }
+  const encodedTerm = encodedEucKrTerm ?? encodeURIComponent(term);
   const query = entries
     .map(([key, value]) => `${encodeURIComponent(key)}=${value === INPUT_MARKER ? encodedTerm : encodeURIComponent(value)}`)
     .join("&");
