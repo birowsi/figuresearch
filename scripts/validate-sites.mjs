@@ -12,10 +12,14 @@ for (const [encoding, sites] of Object.entries(data)) {
 
   for (const site of sites) {
     if (!site.name || names.has(site.name)) errors.push(`Missing or duplicate name: ${site.name ?? "(empty)"}`);
-    if (!site.url?.includes("{input}")) errors.push(`Missing {input} placeholder: ${site.name ?? "(unnamed)"}`);
+    if ((site.url?.match(/\{input\}/g) ?? []).length !== 1) {
+      errors.push(`URL must contain exactly one {input} placeholder: ${site.name ?? "(unnamed)"}`);
+    }
     try {
-      const url = new URL(site.url.replace("{input}", "figure"));
+      const url = new URL(site.url.replace("{input}", "__FIGURE_SEARCH_INPUT__"));
       if (!["http:", "https:"].includes(url.protocol)) errors.push(`Unsupported protocol: ${site.name}`);
+      const matches = [...url.searchParams.values()].filter((value) => value === "__FIGURE_SEARCH_INPUT__");
+      if (matches.length !== 1) errors.push(`{input} must be a query value: ${site.name}`);
     } catch {
       errors.push(`Invalid URL: ${site.name ?? "(unnamed)"}`);
     }

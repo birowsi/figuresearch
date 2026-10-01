@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
-import Encoding from "encoding-japanese";
 import sitesData from "../sites.json";
+import { buildSearchUrl, type SearchEncoding } from "./search-url";
 
-type Encoding = "UTF-8" | "EUC-KR";
-type Site = { id: string; name: string; url: string; encoding: Encoding; host: string };
+type Site = { id: string; name: string; url: string; encoding: SearchEncoding; host: string };
 type SiteCheck = { ok: boolean; status: number | null; detail: string };
 
 const allSites: Site[] = Object.entries(sitesData).flatMap(([encoding, sites]) =>
@@ -13,19 +12,10 @@ const allSites: Site[] = Object.entries(sitesData).flatMap(([encoding, sites]) =
     id: `${encoding}-${index}-${site.name}`,
     name: site.name,
     url: site.url,
-    encoding: encoding as Encoding,
+    encoding: encoding as SearchEncoding,
     host: new URL(site.url).hostname.replace(/^www\./, ""),
   })),
 );
-
-function searchUrl(site: Site, term: string) {
-  const encoded = site.encoding === "EUC-KR"
-    ? Encoding.convert(term, { to: "EUC-KR", from: "UNICODE", type: "ARRAY" })
-      .map((byte) => `%${byte.toString(16).padStart(2, "0").toUpperCase()}`)
-      .join("")
-    : encodeURIComponent(term);
-  return site.url.replaceAll("{input}", encoded);
-}
 
 function App() {
   const [term, setTerm] = useState("");
@@ -35,7 +25,7 @@ function App() {
     return saved ? new Set<string>(JSON.parse(saved)) : new Set(allSites.map((site) => site.id));
   });
   const [filter, setFilter] = useState("");
-  const [encoding, setEncoding] = useState<"all" | Encoding>("all");
+  const [encoding, setEncoding] = useState<"all" | SearchEncoding>("all");
   const [notice, setNotice] = useState("");
   const [checks, setChecks] = useState<Record<string, SiteCheck>>({});
   const [checking, setChecking] = useState(false);
@@ -58,7 +48,7 @@ function App() {
     setNotice("판매처 상태를 확인하는 중...");
     const results = await Promise.all(allSites.map(async (site) => {
       try {
-        const result = await invoke<SiteCheck>("check_site", { url: searchUrl(site, "figure") });
+        const result = await invoke<SiteCheck>("check_site", { url: buildSearchUrl(site, "figure") });
         return [site.id, result] as const;
       } catch (error) {
         return [site.id, { ok: false, status: null, detail: String(error) }] as const;
@@ -92,7 +82,7 @@ function App() {
     const skipped = allSites.filter((site) => selected.has(site.id) && checks[site.id]?.ok === false).length;
     setNotice(`${selectedSites.length}곳의 검색 결과를 여는 중...${skipped ? ` (${skipped}곳 제외)` : ""}`);
     try {
-      await Promise.all(selectedSites.map((site) => open(searchUrl(site, normalized))));
+      await Promise.all(selectedSites.map((site) => open(buildSearchUrl(site, normalized))));
       setNotice(`${selectedSites.length}곳의 검색 결과를 열었습니다.`);
     } catch {
       setNotice("일부 검색 결과를 열지 못했습니다. 외부 브라우저 설정을 확인해 주세요.");
@@ -130,7 +120,7 @@ function App() {
         <div><h2>검색할 판매처</h2><span className="muted">{allSites.length}개 사이트 · {query ? `"${query}"` : "원하는 곳을 선택하세요"}</span></div>
         <div className="controls">
           <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="판매처 검색..." />
-          <select value={encoding} onChange={(event) => setEncoding(event.target.value as "all" | Encoding)}>
+          <select value={encoding} onChange={(event) => setEncoding(event.target.value as "all" | SearchEncoding)}>
             <option value="all">전체 인코딩</option><option value="UTF-8">UTF-8</option><option value="EUC-KR">EUC-KR</option>
           </select>
           <button className="refresh" disabled={checking} onClick={() => void checkSites()}>{checking ? "확인 중..." : "상태 새로고침"}</button>
