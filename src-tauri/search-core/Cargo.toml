@@ -1,0 +1,15 @@
+[package]
+name = "search-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Store HTML extraction, relevance filtering and product classification for FigureSearch"
+
+# Intentionally dependency-free so the search logic can be built and tested
+# anywhere. The Tauri app enables the `serde` feature to serialize results.
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"], optional = true }

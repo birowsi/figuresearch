@@ -1,0 +1,64 @@
+# FigureSearch 검색 별칭
+#
+# 형식: 한국어 | 日本語 | English | 약칭
+#   - 각 칸은 쉼표로 여러 개를 적을 수 있어요. 빈 칸은 비워 두면 돼요.
+#   - 첫 번째 한국어 표기가 대표 이름이에요.
+#   - 줄 앞에 ~ 를 붙이면 "선택 단어"가 돼요. 검색어에 있어도 상품명에 꼭 들어갈
+#     필요는 없어요(제조사처럼 상품명에서 자주 빠지는 단어).
+#   - 약칭(4번째 칸)은 다른 단어 안에 섞여 있으면 인정하지 않고, 단어 전체가
+#     같을 때만 맞는 걸로 봐요. 예: "홀로"는 "홀로그램"과 맞지 않아요.
+
+# 상품 라인
+넨도로이드 | ねんどろいど | Nendoroid | 넨도, Nendo
+넨도로이드 돌 | ねんどろいどどーる | Nendoroid Doll | 넨돌
+피그마 | figma | figma |
+팝업 퍼레이드 | ポップアップパレード | Pop Up Parade | 팝퍼
+피규아츠 | フィギュアーツ | Figuarts | SHF, S.H.Figuarts
+큐포스켓 | Qposket | Q posket |
+이치방쿠지 | 一番くじ | Ichiban Kuji | 제일복권, 일번쿠지
+
+# 제조사 (선택 단어)
+~굿스마일컴퍼니, 굿스마일 | グッドスマイルカンパニー, グッスマ | Good Smile Company, Good Smile | GSC, 굿스
+~맥스팩토리 | マックスファクトリー | Max Factory |
+~코토부키야, 고토부키야 | 壽屋, コトブキヤ | Kotobukiya |
+~반다이, 반다이스피리츠 | バンダイ, バンダイスピリッツ | Bandai, Bandai Spirits |
+~반프레스토 | バンプレスト | Banpresto |
+~메가하우스 | メガハウス | MegaHouse |
+~알터 | アルター | Alter |
+~후류 | フリュー | FuRyu |
+~세가 | セガ | SEGA |
+~타이토 | タイトー | Taito |
+~아니플렉스 | アニプレックス | Aniplex |
+~프리잉 | フリーイング | FREEing |
+
+# 작품 / 캐릭터
+하츠네 미쿠 | 初音ミク | Hatsune Miku | 미쿠, Miku
+블루 아카이브 | ブルーアーカイブ | Blue Archive | 블아, 블루아카
+원신 | 原神 | Genshin Impact, Genshin |
+붕괴 스타레일 | 崩壊スターレイル | Honkai Star Rail | 스타레일, 붕스
+귀멸의 칼날 | 鬼滅の刃 | Demon Slayer, Kimetsu no Yaiba | 귀칼
+주술회전 | 呪術廻戦 | Jujutsu Kaisen |
+체인소 맨, 체인소맨 | チェンソーマン | Chainsaw Man | 전기톱맨
+스파이 패밀리 | スパイファミリー | Spy x Family | 스파패
+원피스 | ワンピース | One Piece |
+나루토 | ナルト | Naruto |
+드래곤볼 | ドラゴンボール | Dragon Ball |
+에반게리온 | エヴァンゲリオン | Evangelion | 에바, Eva
+건담 | ガンダム | Gundam |
+포켓몬스터, 포켓몬 | ポケットモンスター, ポケモン | Pokemon |
+리제로 | リゼロ | Re:Zero |
+봇치 더 록 | ぼっち・ざ・ろっく | Bocchi the Rock | 봇치
+장송의 프리렌, 프리렌 | 葬送のフリーレン, フリーレン | Frieren |
+최애의 아이 | 推しの子 | Oshi no Ko | 오시노코
+우마무스메 | ウマ娘 | Umamusume |
+홀로라이브 | ホロライブ | hololive | 홀로
+아이돌마스터 | アイドルマスター | Idolmaster | 아이마스
+러브라이브 | ラブライブ | Love Live |
+진격의 거인 | 進撃の巨人 | Attack on Titan | 진격거
+하이큐 | ハイキュー | Haikyu |
+명탐정 코난 | 名探偵コナン | Detective Conan | 코난
+세일러문 | セーラームーン | Sailor Moon |
+소드 아트 온라인 | ソードアート・オンライン | Sword Art Online | 소아온, SAO
+페이트 | フェイト | Fate |
+명일방주 | アークナイツ | Arknights |
+니케, 승리의 여신 니케 | ニケ | NIKKE |
