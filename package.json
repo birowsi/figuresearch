@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "여러 피규어 판매처를 한 번에 검색하는 데스크톱 앱",
   "scripts": {
+    "test": "node scripts/validate-sites.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview",

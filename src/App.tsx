@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import Encoding from "encoding-japanese";
 import sitesData from "../sites.json";
 
 type Encoding = "UTF-8" | "EUC-KR";
 type Site = { id: string; name: string; url: string; encoding: Encoding; host: string };
+type SiteCheck = { ok: boolean; status: number | null; detail: string };
 
 const allSites: Site[] = Object.entries(sitesData).flatMap(([encoding, sites]) =>
   sites.map((site, index) => ({
@@ -35,6 +37,10 @@ function App() {
   const [filter, setFilter] = useState("");
   const [encoding, setEncoding] = useState<"all" | Encoding>("all");
   const [notice, setNotice] = useState("");
+  const [checks, setChecks] = useState<Record<string, SiteCheck>>({});
+  const [checking, setChecking] = useState(false);
+  const [showFailedOnly, setShowFailedOnly] = useState(false);
+  const [skipFailed, setSkipFailed] = useState(true);
 
   useEffect(() => {
     localStorage.setItem("figure-search-selected", JSON.stringify([...selected]));
@@ -42,9 +48,29 @@ function App() {
 
   const visibleSites = useMemo(() => allSites.filter((site) =>
     (encoding === "all" || site.encoding === encoding) &&
+    (!showFailedOnly || checks[site.id]?.ok === false) &&
     `${site.name} ${site.host}`.toLowerCase().includes(filter.toLowerCase()),
-  ), [filter, encoding]);
-  const selectedSites = allSites.filter((site) => selected.has(site.id));
+  ), [checks, encoding, filter, showFailedOnly]);
+  const selectedSites = allSites.filter((site) => selected.has(site.id) && (!skipFailed || checks[site.id]?.ok !== false));
+
+  const checkSites = async () => {
+    setChecking(true);
+    setNotice("판매처 상태를 확인하는 중...");
+    const results = await Promise.all(allSites.map(async (site) => {
+      try {
+        const result = await invoke<SiteCheck>("check_site", { url: searchUrl(site, "figure") });
+        return [site.id, result] as const;
+      } catch (error) {
+        return [site.id, { ok: false, status: null, detail: String(error) }] as const;
+      }
+    }));
+    setChecks(Object.fromEntries(results));
+    setChecking(false);
+    const failed = results.filter(([, result]) => !result.ok).length;
+    setNotice(failed ? `${failed}곳은 응답이 없거나 주소가 변경되었을 수 있습니다.` : "모든 판매처가 응답했습니다.");
+  };
+
+  useEffect(() => { void checkSites(); }, []);
 
   const toggle = (id: string) => setSelected((current) => {
     const next = new Set(current);
@@ -63,7 +89,8 @@ function App() {
       return;
     }
     setQuery(normalized);
-    setNotice(`${selectedSites.length}곳의 검색 결과를 여는 중...`);
+    const skipped = allSites.filter((site) => selected.has(site.id) && checks[site.id]?.ok === false).length;
+    setNotice(`${selectedSites.length}곳의 검색 결과를 여는 중...${skipped ? ` (${skipped}곳 제외)` : ""}`);
     try {
       await Promise.all(selectedSites.map((site) => open(searchUrl(site, normalized))));
       setNotice(`${selectedSites.length}곳의 검색 결과를 열었습니다.`);
@@ -106,10 +133,13 @@ function App() {
           <select value={encoding} onChange={(event) => setEncoding(event.target.value as "all" | Encoding)}>
             <option value="all">전체 인코딩</option><option value="UTF-8">UTF-8</option><option value="EUC-KR">EUC-KR</option>
           </select>
+          <button className="refresh" disabled={checking} onClick={() => void checkSites()}>{checking ? "확인 중..." : "상태 새로고침"}</button>
         </div>
       </section>
 
       <div className="selection-actions">
+        <label><input type="checkbox" checked={skipFailed} onChange={(event) => setSkipFailed(event.target.checked)} /> 실패 사이트 검색에서 제외</label>
+        <label><input type="checkbox" checked={showFailedOnly} onChange={(event) => setShowFailedOnly(event.target.checked)} /> 실패 사이트만 보기</label>
         <button onClick={() => selectVisible(true)}>보이는 판매처 모두 선택</button>
         <button onClick={() => selectVisible(false)}>보이는 판매처 해제</button>
       </div>
@@ -120,6 +150,9 @@ function App() {
             <input type="checkbox" checked={selected.has(site.id)} onChange={() => toggle(site.id)} />
             <span className="checkmark">✓</span>
             <span className="site-info"><strong>{site.name}</strong><small>{site.host}</small></span>
+            <span className={`status ${checks[site.id] ? checks[site.id].ok ? "ok" : "failed" : "unknown"}`}>
+              {checks[site.id] ? checks[site.id].status === 429 ? "제한" : checks[site.id].ok ? "정상" : "실패" : "미확인"}
+            </span>
             <span className="encoding">{site.encoding}</span>
           </label>
         ))}
