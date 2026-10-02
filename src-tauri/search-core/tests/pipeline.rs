@@ -178,3 +178,14 @@ fn table_layout_prefers_bold_sale_price_over_points_column() {
     let out = process_html("논노21", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, html);
     assert_eq!(out.products[0].price, Some(38_000));
 }
+
+#[test]
+fn human_verification_pages_are_blocked() {
+    let analysis = analyze("미쿠");
+    let cafe24 = "https://veritas-hub.cafe24.com/challenge?auth=x&url=y";
+    let page = "<body>컨텐츠 바로가기 안전한 이용을 위해 간단한 확인이 필요해요.</body>";
+    assert_eq!(process_html("피규어프레소", Platform::Cafe24, &analysis, "미쿠", 200, cafe24, page).status, PageStatus::Blocked);
+    let url = "https://www.1004gundam.co.kr/mall/search.php?q=x";
+    let page = "<body>자동등록방지를 위해 보안절차를 거치고 있습니다. Please prove that you are human.</body>";
+    assert_eq!(process_html("천사건담", detect_platform(url), &analysis, "미쿠", 200, url, page).status, PageStatus::Blocked);
+}

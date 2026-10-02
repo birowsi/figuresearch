@@ -239,6 +239,7 @@ pub fn page_signal(doc: &Document, final_url: &str) -> PageSignal {
     const BOT: &[&str] = &[
         "captcha", "자동입력 방지", "자동 입력 방지", "보안문자", "robot check", "just a moment", "cf-chl",
         "비정상적인 접근", "접근이 차단", "access denied", "보안 확인",
+        "보안절차를 거치고", "prove that you are human", "간단한 확인이 필요",
     ];
     const EMPTY: &[&str] = &[
         "검색 결과가 없습니다", "검색결과가 없습니다", "검색된 상품이 없습니다", "검색된 상품이 없어요",
@@ -246,7 +247,7 @@ pub fn page_signal(doc: &Document, final_url: &str) -> PageSignal {
         "등록된 상품이 없습니다", "일치하는 상품이 없습니다", "검색어와 일치하는",
         "검색결과 0개", "검색 결과 0개", "검색결과 0건", "검색 결과 0건", "검색결과(0)", "검색 결과(0)",
     ];
-    if BOT.iter().any(|w| text.contains(w)) {
+    if BOT.iter().any(|w| text.contains(w)) || url::path(&lower_url).contains("/challenge") {
         PageSignal::BotChallenge
     } else if url::host(&lower_url).starts_with("nid.naver.com")
         || ["login", "adult"].iter().any(|w| url::path(&lower_url).contains(w))
