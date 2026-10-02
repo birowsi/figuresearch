@@ -188,6 +188,8 @@ pub fn process_html(
             extract::PageSignal::LoginPage => PageStatus::LoginRequired,
             _ if matches!(http_status, 401 | 403) => PageStatus::Blocked,
             _ if http_status >= 400 => PageStatus::HttpError,
+            // 204 means the search endpoint answered without a page (moved or disabled).
+            _ if http_status == 204 => PageStatus::HttpError,
             extract::PageSignal::EmptyMessage => PageStatus::Empty,
             _ if html.trim().is_empty() => PageStatus::Empty,
             _ => PageStatus::Unparsed,

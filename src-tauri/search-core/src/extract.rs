@@ -244,6 +244,7 @@ pub fn page_signal(doc: &Document, final_url: &str) -> PageSignal {
         "검색 결과가 없습니다", "검색결과가 없습니다", "검색된 상품이 없습니다", "검색된 상품이 없어요",
         "찾으시는 상품이 없습니다", "상품이 없습니다", "검색 결과가 없어요", "결과가 없습니다", "no results",
         "등록된 상품이 없습니다", "일치하는 상품이 없습니다", "검색어와 일치하는",
+        "검색결과 0개", "검색 결과 0개", "검색결과 0건", "검색 결과 0건", "검색결과(0)", "검색 결과(0)",
     ];
     if BOT.iter().any(|w| text.contains(w)) {
         PageSignal::BotChallenge
@@ -458,7 +459,7 @@ const EXCLUDED_CONTEXT: &[&str] = &["적립", "포인트", "마일리지", "배�
 const CONSUMER_CONTEXT: &[&str] = &["소비자가", "정가", "시중가", "권장소비자"];
 
 fn read_price(doc: &Document, card: NodeId) -> Option<u64> {
-    let mut candidates: Vec<(u64, bool)> = Vec::new(); // (value, discount-labelled)
+    let mut candidates: Vec<(u64, bool, bool)> = Vec::new(); // (value, discount-labelled, emphasized)
     let elements: Vec<NodeId> = std::iter::once(card).chain(doc.descendants(card)).filter(|&id| doc.tag(id).is_some()).collect();
     for &id in &elements {
         if doc.is_hidden(id) || doc.ancestors(id).take_while(|&a| a != card).any(|a| doc.is_hidden(a)) {
@@ -496,14 +497,16 @@ fn read_price(doc: &Document, card: NodeId) -> Option<u64> {
             continue;
         }
         let discount = context.contains("할인") || context.to_ascii_lowercase().contains("sale");
+        // Table layouts put an unlabeled points column next to the bold sale price.
+        let emphasized = chain.iter().any(|&a| matches!(doc.tag(a), Some("b" | "strong")));
         for (_, value, _) in prices {
-            candidates.push((value, discount));
+            candidates.push((value, discount, emphasized));
         }
     }
-    if let Some(&(value, _)) = candidates.iter().filter(|(_, d)| *d).min_by_key(|(v, _)| *v) {
+    if let Some(&(value, ..)) = candidates.iter().filter(|(_, d, _)| *d).min_by_key(|(v, ..)| *v) {
         return Some(value);
     }
-    if let Some(&(value, _)) = candidates.first() {
+    if let Some(&(value, ..)) = candidates.iter().find(|(_, _, e)| *e).or(candidates.first()) {
         return Some(value);
     }
     // Cafe24 / misc data attributes

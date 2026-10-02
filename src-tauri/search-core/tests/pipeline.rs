@@ -155,3 +155,26 @@ fn adult_verification_redirect_is_login_required() {
     let out = process_html("피규어세일러", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, "<html><body>성인인증</body></html>");
     assert_eq!(out.status, PageStatus::LoginRequired);
 }
+
+#[test]
+fn zero_result_count_is_empty_and_204_is_an_error() {
+    let url = "https://www.animate-onlineshop.co.kr/goods/goods_search.php?keyword=x";
+    let html = r#"<div class="search_tit"><span>&quot;유우카&quot;</span> 검색결과 0개</div>"#;
+    let out = process_html("애니메이트코리아", detect_platform(url), &analyze("유우카"), "유우카", 200, url, html);
+    assert_eq!(out.status, PageStatus::Empty);
+    let out = process_html("논노21", detect_platform(url), &analyze("유우카"), "유우카", 204, url, "");
+    assert_eq!(out.status, PageStatus::HttpError);
+}
+
+#[test]
+fn table_layout_prefers_bold_sale_price_over_points_column() {
+    let url = "http://nonno21.com/shop/shopbrand.html?search=x";
+    let html = r#"<table><tr>
+      <td><a href="/shop/shopdetail.html?branduid=45808"><img src="/a.jpg"></a></td>
+      <td><a href="/shop/shopdetail.html?branduid=45808">하츠네 미쿠 누들 스토퍼</a></td>
+      <td>1140원</td>
+      <td><div style="color:gray"><strike>42,000원</strike></div><b style="color:#C94C00">38,000원</b></td>
+    </tr></table>"#;
+    let out = process_html("논노21", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, html);
+    assert_eq!(out.products[0].price, Some(38_000));
+}

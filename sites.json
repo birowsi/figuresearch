@@ -33,6 +33,6 @@
     ],
     "EUC-KR": [
         {"name": "천사건담", "url": "https://www.1004gundam.co.kr/mall/search.php?q={input}", "profile": {"eucKrFallback": "UTF-8"}},
-        {"name": "논노21", "url": "http://nonno21.com/shop/goods/goods_search.php?searched=Y&skey=all&sword={input}", "profile": {"eucKrFallback": "UTF-8"}, "shipping": {"fee": 3500, "freeOver": 80000}}
+        {"name": "논노21", "url": "http://nonno21.com/shop/shopbrand.html?search={input}", "profile": {"eucKrFallback": "UTF-8"}, "shipping": {"fee": 3500, "freeOver": 80000}}
     ]
 }
