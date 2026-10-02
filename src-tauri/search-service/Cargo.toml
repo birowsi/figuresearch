@@ -1,0 +1,15 @@
+[package]
+name = "search-service"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Fetches store search pages and reports per-store results; shared by the desktop app and the web server"
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "deflate"] }
+encoding_rs = "0.8"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+search-core = { path = "../search-core", features = ["serde"] }

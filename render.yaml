@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: figuresearch
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true

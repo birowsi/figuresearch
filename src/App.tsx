@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-shell";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { checkSites as fetchChecks, isDesktop, openExternal, searchStores, type SiteCheck } from "./backend";
 import sitesData from "../sites.json";
 import {
   applyFiltersGrouped, categoryCounts, categoryLabels, defaultFilters, formatPrice, isFailure, lowestPrice,
@@ -10,7 +8,6 @@ import {
 
 type SiteConfig = { name: string; url: string; shipping?: ShippingPolicy };
 type Site = { name: string; host: string; encoding: string };
-type SiteCheck = { ok: boolean; status: number | null; detail: string };
 
 const allSites: Site[] = Object.entries(sitesData).flatMap(([encoding, sites]) =>
   (sites as SiteConfig[]).map((site) => ({
@@ -56,18 +53,10 @@ function App() {
     try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch { /* ignore */ }
   }, [selected]);
 
-  useEffect(() => {
-    const unlisten = listen<StoreResult>("search-store", (event) => {
-      if (event.payload.searchId !== searchId.current) return;
-      setStores((current) => ({ ...current, [event.payload.store]: event.payload }));
-    });
-    return () => { void unlisten.then((stop) => stop()); };
-  }, []);
-
   const checkSites = async () => {
     setChecking(true);
     try {
-      const result = await invoke<Record<string, SiteCheck>>("check_sites");
+      const result = await fetchChecks();
       setChecks(result);
       const ok = Object.values(result).filter((check) => check.ok).length;
       setNotice((current) => current || `${ok}/${allSites.length}곳이 응답했어요.`);
@@ -98,7 +87,9 @@ function App() {
     setSearching(true);
     setNotice(`${selectedSites.length}곳에서 검색 중...`);
     try {
-      await invoke("search_stores", { searchId: id, term: query, stores: selectedSites.map((site) => site.name) });
+      await searchStores(id, query, selectedSites.map((site) => site.name), (result) => {
+        if (searchId.current === id) setStores((current) => ({ ...current, [result.store]: result }));
+      });
       if (searchId.current === id) setNotice("");
     } catch (error) {
       if (searchId.current === id) setNotice(String(error));
@@ -129,7 +120,7 @@ function App() {
   });
   const updateFilter = <K extends keyof ResultFilters>(key: K, value: ResultFilters[K]) =>
     setFilters((current) => ({ ...current, [key]: value }));
-  const openUrl = (url: string | null) => { if (url) void open(url); };
+  const openUrl = (url: string | null) => { if (url) void openExternal(url); };
 
   const checkLabel = (name: string) => {
     const check = checks[name];
@@ -262,7 +253,9 @@ function App() {
         </label>;
       })}</section>
       {!visibleSites.length && <div className="empty">조건에 맞는 판매처가 없어요.</div>}
-      <footer>검색 결과는 앱 안에 표시되고, 상품이나 판매처를 누를 때만 외부 브라우저가 열려요. 네이버 스마트스토어는 앱 안에서 검색할 수 없어 브라우저 링크로 제공해요.</footer>
+      <footer>{isDesktop
+        ? "검색 결과는 앱 안에 표시되고, 상품이나 판매처를 누를 때만 외부 브라우저가 열려요. 네이버 스마트스토어는 앱 안에서 검색할 수 없어 브라우저 링크로 제공해요."
+        : "검색은 서버가 판매처마다 대신 해요. 상품이나 판매처를 누르면 새 탭으로 열려요. 네이버 스마트스토어는 직접 검색할 수 없어 링크로 제공해요."}</footer>
     </main>
   );
 }

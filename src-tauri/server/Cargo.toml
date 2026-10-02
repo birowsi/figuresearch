@@ -1,0 +1,17 @@
+[package]
+name = "figuresearch-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "FigureSearch web server: serves the frontend and streams store search results"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+tokio-stream = "0.1"
+tower-http = { version = "0.6", features = ["fs", "compression-gzip"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+search-service = { path = "../search-service" }

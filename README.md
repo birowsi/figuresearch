@@ -1,6 +1,6 @@
 # FigureSearch
 
-국내 피규어 판매처 여러 곳을 한 번에 검색해서, 결과를 앱 안에 모아 보여 주는 Windows 데스크톱 앱입니다. 상품이나 판매처를 누를 때만 외부 브라우저가 열립니다.
+국내 피규어 판매처 여러 곳을 한 번에 검색해서, 결과를 한 화면에 모아 보여 주는 앱입니다. Windows 데스크톱 앱과 웹앱 두 가지로 쓸 수 있고, 둘은 같은 검색 엔진을 씁니다.
 
 ## 실행
 
@@ -10,6 +10,27 @@ Node.js와 Rust가 설치된 환경에서 다음 명령을 실행합니다.
 npm install
 npm run tauri dev
 ```
+
+## 웹앱
+
+웹앱은 Rust 서버(`src-tauri/server`)가 판매처 검색을 대신 하고, 결과를 판매처마다 서버 전송 이벤트(SSE)로 보내 줍니다. 같은 서버가 빌드된 화면(`dist`)도 함께 제공해요.
+
+로컬에서 실행:
+
+```bash
+npm run build
+cargo run --release -p figuresearch-server --manifest-path src-tauri/Cargo.toml
+```
+
+`http://localhost:8080`에서 열려요. 포트는 `PORT`, 화면 폴더는 `DIST_DIR` 환경 변수로 바꿀 수 있어요.
+
+### Render 무료 배포
+
+1. [Render](https://render.com)에 GitHub 계정으로 가입합니다.
+2. **New → Blueprint**에서 이 저장소를 고르면 `render.yaml` 설정(무료 요금제, 싱가포르 지역, Docker)대로 서비스가 만들어져요.
+3. 이후 `main`에 push할 때마다 자동으로 다시 배포돼요.
+
+무료 요금제는 15분 동안 접속이 없으면 서버가 잠들어서, 그 뒤 첫 접속은 30~60초쯤 걸려요. 서버는 동시에 검색 4건까지만 받고, 판매처 상태 확인 결과는 10분 동안 재사용해요.
 
 ## 테스트
 
@@ -23,7 +44,10 @@ npm run test:all    # 둘 다
 
 ```
 src/                      React UI (결과 표시, 분류 필터, 판매처 선택)
-src-tauri/src/lib.rs      Tauri 명령: 판매처 요청, 문자셋 디코딩, 번개장터 API, 결과 스트리밍
+src/backend.ts            데스크톱(Tauri)과 웹(HTTP/SSE) 백엔드 연결
+src-tauri/src/lib.rs      Tauri 명령: 검색 결과를 화면으로 스트리밍
+src-tauri/search-service/ 판매처 요청, 문자셋 디코딩, 번개장터 API, 판매처별 동시 검색 (데스크톱·웹 공용)
+src-tauri/server/         웹 서버 (axum): /api/search(SSE), /api/check, 화면 제공
 src-tauri/search-core/    검색 핵심 로직 (외부 의존성 없음)
   src/html.rs             망가진 HTML도 읽는 관대한 파서
   src/extract.rs          쇼핑몰 플랫폼별 상품 카드 추출 (Cafe24, 고도몰, 메이크샵, 영카트, 아임웹, 알라딘, 예스24, 범용)
@@ -32,6 +56,7 @@ src-tauri/search-core/    검색 핵심 로직 (외부 의존성 없음)
   src/classify.rs         상품 분류(넨도로이드, figma, 스케일, 프라이즈 …)와 예약·중고·특전 태그
   data/aliases.txt        검색 별칭(한·일·영 표기, 약칭) — 직접 추가할 수 있어요
 sites.json                판매처 목록
+Dockerfile, render.yaml   웹앱 배포 설정
 ```
 
 ### 검색 흐름
