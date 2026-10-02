@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import sitesData from "../sites.json";
 import {
-  applyFilters, categoryCounts, categoryLabels, defaultFilters, formatPrice, isFailure, lowestPrice,
+  applyFiltersGrouped, categoryCounts, categoryLabels, defaultFilters, formatPrice, isFailure, lowestPrice,
   statusLabels, tagLabels, type Product, type ResultFilters, type SortKey, type StoreResult,
 } from "./results";
 
@@ -106,7 +106,7 @@ function App() {
 
   const storeResults = Object.values(stores);
   const products = useMemo(() => Object.values(stores).flatMap((store) => store.products), [stores]);
-  const visibleProducts = useMemo(() => applyFilters(products, filters), [products, filters]);
+  const visibleGroups = useMemo(() => applyFiltersGrouped(products, filters), [products, filters]);
   const counts = useMemo(() => categoryCounts(products, filters), [products, filters]);
   const relevantCount = products.filter((p) => p.relevant).length;
   const hiddenCount = storeResults.reduce((sum, store) => sum + store.hidden, 0);
@@ -189,23 +189,38 @@ function App() {
             </div>
           </div>
 
-          {visibleProducts.length > 0 ? <div className="result-list">{visibleProducts.map((p) => (
-            <article className={`result-row ${p.relevant ? "" : "dimmed"}`} key={p.id} onClick={() => openUrl(p.url)}
-              onKeyDown={(e) => { if (e.key === "Enter") openUrl(p.url); }} role={p.url ? "button" : undefined} tabIndex={p.url ? 0 : undefined}>
-              {p.imageUrl ? <img src={p.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="image-placeholder" />}
-              <div className="result-main">
-                <strong>{p.name}</strong>
-                <small>
-                  <span>{p.store}</span>
-                  <span className="category">{categoryLabels[p.category]}</span>
-                  {p.tags.map((tag) => <span key={tag} className={`tag tag-${tag}`}>{tagLabels[tag]}</span>)}
-                  {p.release && <span>{p.release}</span>}
-                  <span className={p.availability === "sold_out" ? "soldout" : ""}>{availabilityLabel(p)}</span>
-                  {!p.relevant && p.missing.length > 0 && <span className="missing">없는 단어: {p.missing.join(", ")}</span>}
-                </small>
-              </div>
-              <span className={`result-price ${p.availability === "sold_out" ? "soldout" : ""}`}>{formatPrice(p.price)}</span>
-            </article>
+          {visibleGroups.length > 0 ? <div className="result-list">{visibleGroups.map(({ key, best: p, offers }) => (
+            <div className={`result-group ${offers.some((o) => o.relevant) ? "" : "dimmed"}`} key={key}>
+              <article className="result-row" onClick={() => openUrl(p.url)}
+                onKeyDown={(e) => { if (e.key === "Enter") openUrl(p.url); }} role={p.url ? "button" : undefined} tabIndex={p.url ? 0 : undefined}>
+                {p.imageUrl ? <img src={p.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="image-placeholder" />}
+                <div className="result-main">
+                  <strong>{p.name}</strong>
+                  <small>
+                    <span>{offers.length > 1 ? `판매처 ${offers.length}곳 · 최저 ${p.store}` : p.store}</span>
+                    <span className="category">{categoryLabels[p.category]}</span>
+                    {p.tags.map((tag) => <span key={tag} className={`tag tag-${tag}`}>{tagLabels[tag]}</span>)}
+                    {p.release && <span>{p.release}</span>}
+                    <span className={p.availability === "sold_out" ? "soldout" : ""}>{availabilityLabel(p)}</span>
+                    {!p.relevant && p.missing.length > 0 && <span className="missing">없는 단어: {p.missing.join(", ")}</span>}
+                  </small>
+                </div>
+                <span className={`result-price ${p.availability === "sold_out" ? "soldout" : ""}`}>
+                  {offers.length > 1 && p.price !== null && <em>최저</em>}{formatPrice(p.price)}
+                </span>
+              </article>
+              {offers.length > 1 && <ul className="offer-list">{offers.map((o) => (
+                <li key={o.id} className={o === p ? "cheapest" : ""} onClick={() => openUrl(o.url)}
+                  onKeyDown={(e) => { if (e.key === "Enter") openUrl(o.url); }} role={o.url ? "button" : undefined} tabIndex={o.url ? 0 : undefined}>
+                  <span className="offer-store">{o.store}</span>
+                  <span className="offer-meta">
+                    {o.tags.map((tag) => <span key={tag} className={`tag tag-${tag}`}>{tagLabels[tag]}</span>)}
+                    <span className={o.availability === "sold_out" ? "soldout" : ""}>{availabilityLabel(o)}</span>
+                  </span>
+                  <span className={`result-price ${o.availability === "sold_out" ? "soldout" : ""}`}>{formatPrice(o.price)}</span>
+                </li>
+              ))}</ul>}
+            </div>
           ))}</div> : !searching && <div className="empty">
             {hiddenCount > 0 ? "검색어와 정확히 맞는 상품이 없어요. '관련 낮은 결과 보기'로 비슷한 상품을 볼 수 있어요." : "조건에 맞는 상품이 없어요."}
           </div>}

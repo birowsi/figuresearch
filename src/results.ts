@@ -95,28 +95,86 @@ export const defaultFilters: ResultFilters = {
   hideSoldOut: false,
   hideUsed: false,
   showHidden: false,
-  sort: "relevance",
+  sort: "price-asc",
 };
 
 export const formatPrice = (price: number | null) => (price === null ? "가격 정보 없음" : `${price.toLocaleString("ko-KR")}원`);
 
 const availabilityRank: Record<Availability, number> = { in_stock: 0, unknown: 1, sold_out: 2 };
 
+const byPrice = (a: Product, b: Product, direction: 1 | -1) =>
+  a.price === null ? (b.price === null ? 0 : 1) : b.price === null ? -1 : (a.price - b.price) * direction;
+
+function compareProducts(a: Product, b: Product, sort: SortKey) {
+  if (a.relevant !== b.relevant) return a.relevant ? -1 : 1;
+  switch (sort) {
+    case "price-asc": return byPrice(a, b, 1);
+    case "price-desc": return byPrice(a, b, -1);
+    case "store": return a.store.localeCompare(b.store, "ko") || b.relevance - a.relevance;
+    default:
+      return b.relevance - a.relevance ||
+        availabilityRank[a.availability] - availabilityRank[b.availability] ||
+        byPrice(a, b, 1);
+  }
+}
+
 export function sortProducts(products: Product[], sort: SortKey) {
-  const byPrice = (a: Product, b: Product, direction: 1 | -1) =>
-    a.price === null ? (b.price === null ? 0 : 1) : b.price === null ? -1 : (a.price - b.price) * direction;
-  return [...products].sort((a, b) => {
-    if (a.relevant !== b.relevant) return a.relevant ? -1 : 1;
-    switch (sort) {
-      case "price-asc": return byPrice(a, b, 1);
-      case "price-desc": return byPrice(a, b, -1);
-      case "store": return a.store.localeCompare(b.store, "ko") || b.relevance - a.relevance;
-      default:
-        return b.relevance - a.relevance ||
-          availabilityRank[a.availability] - availabilityRank[b.availability] ||
-          byPrice(a, b, 1);
-    }
+  return [...products].sort((a, b) => compareProducts(a, b, sort));
+}
+
+// Words stores add around the real product name (sale state, shipping, origin).
+const noiseWords = new Set([
+  "예약", "예약판매", "예약상품", "선주문", "재판", "재입고", "입고", "입고완료", "발매", "출시", "발송", "예정",
+  "당일발송", "즉시발송", "빠른배송", "무료배송", "정품", "신품", "새상품", "미개봉", "국내", "국내정발", "정발",
+  "일본", "일본판", "해외", "특전", "한정", "마감", "품절", "판매중", "재고", "pre", "order", "preorder",
+]);
+const datePattern = /^(\d+(년|월|일|차))+$/;
+
+const hiraganaToKatakana = (text: string) =>
+  text.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+
+/**
+ * Key that is equal for listings of the same product across stores: noise words
+ * and dates dropped, case/width/kana folded, word order ignored. Used and
+ * bootleg listings never merge with new ones.
+ */
+export function productKey(p: Product) {
+  const words = hiraganaToKatakana(p.name.normalize("NFKC").toLowerCase())
+    .replace(/[^\p{L}\p{N}/]+/gu, " ")
+    .split(" ")
+    .filter((w) => w && w !== "/" && !noiseWords.has(w) && !datePattern.test(w));
+  if (!words.length) return `id:${p.id}`;
+  const condition = [p.tags.includes("used") ? "used" : "", p.tags.includes("bootleg") ? "bootleg" : ""].join(",");
+  return `${condition}|${words.sort().join(" ")}`;
+}
+
+export type ProductGroup = {
+  key: string;
+  /** Cheapest available listing first, sold-out and unknown prices last. */
+  offers: Product[];
+  best: Product;
+};
+
+const offerOrder = (a: Product, b: Product) =>
+  Number(a.availability === "sold_out") - Number(b.availability === "sold_out") || byPrice(a, b, 1);
+
+export function groupProducts(products: Product[], sort: SortKey): ProductGroup[] {
+  const groups = new Map<string, Product[]>();
+  for (const p of products) {
+    const key = productKey(p);
+    groups.set(key, [...(groups.get(key) ?? []), p]);
+  }
+  const result = [...groups.entries()].map(([key, offers]) => {
+    offers.sort(offerOrder);
+    return { key, offers, best: offers[0] };
   });
+  // Rank a group by its cheapest offer, but with the best relevance any offer has.
+  const representative = (g: ProductGroup): Product => ({
+    ...g.best,
+    relevant: g.offers.some((p) => p.relevant),
+    relevance: Math.max(...g.offers.map((p) => p.relevance)),
+  });
+  return result.sort((a, b) => compareProducts(representative(a), representative(b), sort));
 }
 
 /** Products passing every filter except the category (used for chip counts). */
@@ -132,6 +190,9 @@ export function applyFilters(products: Product[], filters: ResultFilters) {
   const visible = filters.category === "all" ? base : base.filter((p) => p.category === filters.category);
   return sortProducts(visible, filters.sort);
 }
+
+export const applyFiltersGrouped = (products: Product[], filters: ResultFilters) =>
+  groupProducts(applyFilters(products, filters), filters.sort);
 
 export function categoryCounts(products: Product[], filters: ResultFilters) {
   const counts = new Map<Category, number>();
