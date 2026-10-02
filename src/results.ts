@@ -26,7 +26,30 @@ export type Product = {
   query: string;
   /** Same for listings of the same product across stores (computed in Rust); empty if unknown. */
   groupKey: string;
+  /** The listing itself says shipping is free. */
+  freeShipping: boolean;
+  /** Shipping fee for this listing (filled in from the store policy); null when unknown. */
+  shipping?: number | null;
 };
+
+/** Store shipping policy from sites.json: flat fee, free from `freeOver` won. */
+export type ShippingPolicy = { fee: number; freeOver?: number };
+
+export function shippingFee(p: Product, policy: ShippingPolicy | undefined): number | null {
+  if (p.freeShipping) return 0;
+  if (!policy) return null;
+  if (policy.freeOver !== undefined && p.price !== null && p.price >= policy.freeOver) return 0;
+  return policy.fee;
+}
+
+export const withShipping = (products: Product[], policies: Record<string, ShippingPolicy | undefined>) =>
+  products.map((p) => ({ ...p, shipping: shippingFee(p, policies[p.store]) }));
+
+/** What the buyer pays for this listing alone; unknown shipping counts as 0. */
+export const totalPrice = (p: Product) => (p.price === null ? null : p.price + (p.shipping ?? 0));
+
+export const shippingLabel = (p: Product) =>
+  p.price === null ? "" : p.shipping === 0 ? "무료배송" : p.shipping ? `배송비 ${p.shipping.toLocaleString("ko-KR")}원 포함` : "배송비 별도";
 
 export type StoreResult = {
   searchId: string;
@@ -104,8 +127,10 @@ export const formatPrice = (price: number | null) => (price === null ? "가격 �
 
 const availabilityRank: Record<Availability, number> = { in_stock: 0, unknown: 1, sold_out: 2 };
 
-const byPrice = (a: Product, b: Product, direction: 1 | -1) =>
-  a.price === null ? (b.price === null ? 0 : 1) : b.price === null ? -1 : (a.price - b.price) * direction;
+function byPrice(a: Product, b: Product, direction: 1 | -1) {
+  const x = totalPrice(a), y = totalPrice(b);
+  return x === null ? (y === null ? 0 : 1) : y === null ? -1 : (x - y) * direction;
+}
 
 function compareProducts(a: Product, b: Product, sort: SortKey) {
   if (a.relevant !== b.relevant) return a.relevant ? -1 : 1;
@@ -180,7 +205,7 @@ export function categoryCounts(products: Product[], filters: ResultFilters) {
 }
 
 export function lowestPrice(products: Product[]) {
-  const prices = products.filter((p) => p.relevant && p.price !== null && p.availability !== "sold_out").map((p) => p.price!);
+  const prices = products.filter((p) => p.relevant && p.price !== null && p.availability !== "sold_out").map((p) => totalPrice(p)!);
   return prices.length ? Math.min(...prices) : null;
 }
 

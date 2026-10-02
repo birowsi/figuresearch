@@ -35,6 +35,13 @@ for (const [encoding, sites] of Object.entries(data)) {
     if (profile.eucKrFallback !== undefined && !["UTF-8", "skip"].includes(profile.eucKrFallback)) {
       errors.push(`eucKrFallback must be "UTF-8" or "skip": ${site.name}`);
     }
+    if (site.shipping !== undefined) {
+      const { fee, freeOver } = site.shipping;
+      if (!Number.isInteger(fee) || fee < 0) errors.push(`shipping.fee must be a non-negative integer: ${site.name}`);
+      if (freeOver !== undefined && (!Number.isInteger(freeOver) || freeOver <= 0)) {
+        errors.push(`shipping.freeOver must be a positive integer: ${site.name}`);
+      }
+    }
     names.add(site.name);
   }
 }

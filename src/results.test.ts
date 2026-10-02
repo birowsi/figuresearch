@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyFilters, categoryCounts, defaultFilters, formatPrice, groupProducts, lowestPrice, productKey, type Product,
+  applyFilters, categoryCounts, defaultFilters, formatPrice, groupProducts, lowestPrice, productKey, shippingLabel, totalPrice,
+  withShipping, type Product,
 } from "./results";
 
 const product = (overrides: Partial<Product>): Product => ({
   id: `${overrides.store ?? "A"}:${overrides.name ?? "x"}`, store: "A", name: "x", url: null, price: null, imageUrl: null,
   availability: "in_stock", category: "nendoroid", tags: [], release: null, relevance: 1,
-  relevant: true, missing: [], query: "q", groupKey: "", ...overrides,
+  relevant: true, missing: [], query: "q", groupKey: "", freeShipping: false, ...overrides,
 });
 
 const products = [
@@ -57,5 +58,29 @@ describe("grouping identical products", () => {
   it("never merges listings without a key", () => {
     expect(groupProducts([product({ store: "A" }), product({ store: "B" })], "price-asc")).toHaveLength(2);
     expect(productKey(product({ store: "A" }))).not.toBe(productKey(product({ store: "B" })));
+  });
+});
+
+describe("shipping", () => {
+  const policies = { A: { fee: 3000, freeOver: 50000 }, B: { fee: 2500 } };
+
+  it("adds the store fee below the free-shipping threshold", () => {
+    const [cheap, expensive, freeListing, unknownStore] = withShipping([
+      product({ store: "A", name: "a", price: 30000 }),
+      product({ store: "A", name: "b", price: 50000 }),
+      product({ store: "B", name: "c", price: 30000, freeShipping: true }),
+      product({ store: "C", name: "d", price: 30000 }),
+    ], policies);
+    expect([cheap, expensive, freeListing, unknownStore].map((p) => p.shipping)).toEqual([3000, 0, 0, null]);
+    expect(totalPrice(cheap)).toBe(33000);
+    expect([cheap, expensive, unknownStore].map(shippingLabel)).toEqual(["배송비 3,000원 포함", "무료배송", "배송비 별도"]);
+  });
+
+  it("ranks offers by price including shipping", () => {
+    const [group] = groupProducts(withShipping([
+      product({ store: "A", name: "x", price: 30000, groupKey: "k" }),
+      product({ store: "B", name: "y", price: 31000, groupKey: "k", freeShipping: true }),
+    ], policies), "price-asc");
+    expect(group.offers.map((p) => p.store)).toEqual(["B", "A"]);
   });
 });

@@ -5,10 +5,10 @@ import { listen } from "@tauri-apps/api/event";
 import sitesData from "../sites.json";
 import {
   applyFiltersGrouped, categoryCounts, categoryLabels, defaultFilters, formatPrice, isFailure, lowestPrice,
-  statusLabels, tagLabels, type Product, type ResultFilters, type SortKey, type StoreResult,
+  shippingLabel, statusLabels, tagLabels, totalPrice, withShipping, type Product, type ShippingPolicy, type ResultFilters, type SortKey, type StoreResult,
 } from "./results";
 
-type SiteConfig = { name: string; url: string };
+type SiteConfig = { name: string; url: string; shipping?: ShippingPolicy };
 type Site = { name: string; host: string; encoding: string };
 type SiteCheck = { ok: boolean; status: number | null; detail: string };
 
@@ -18,6 +18,9 @@ const allSites: Site[] = Object.entries(sitesData).flatMap(([encoding, sites]) =
     encoding,
     host: new URL(site.url.replace("{input}", "x")).hostname.replace(/^www\./, ""),
   })),
+);
+const shippingPolicies = Object.fromEntries(
+  Object.values(sitesData).flatMap((sites) => (sites as SiteConfig[]).map((site) => [site.name, site.shipping])),
 );
 const siteNames = new Set(allSites.map((site) => site.name));
 const SELECTED_KEY = "figure-search-selected-v2";
@@ -105,7 +108,7 @@ function App() {
   };
 
   const storeResults = Object.values(stores);
-  const products = useMemo(() => Object.values(stores).flatMap((store) => store.products), [stores]);
+  const products = useMemo(() => withShipping(Object.values(stores).flatMap((store) => store.products), shippingPolicies), [stores]);
   const visibleGroups = useMemo(() => applyFiltersGrouped(products, filters), [products, filters]);
   const counts = useMemo(() => categoryCounts(products, filters), [products, filters]);
   const relevantCount = products.filter((p) => p.relevant).length;
@@ -160,7 +163,7 @@ function App() {
           <span>상품 {relevantCount}</span>
           {hiddenCount > 0 && <span>관련 낮음 {hiddenCount}</span>}
           {failedCount > 0 && <span className="summary-warn">실패 {failedCount}</span>}
-          <span>최저가 {minPrice === null ? "정보 없음" : formatPrice(minPrice)}</span>
+          <span>최저가(배송비 포함) {minPrice === null ? "정보 없음" : formatPrice(minPrice)}</span>
           {searchedTerm && <span className="muted">"{searchedTerm}"</span>}
         </section>
 
@@ -206,7 +209,8 @@ function App() {
                   </small>
                 </div>
                 <span className={`result-price ${p.availability === "sold_out" ? "soldout" : ""}`}>
-                  {offers.length > 1 && p.price !== null && <em>최저</em>}{formatPrice(p.price)}
+                  {offers.length > 1 && p.price !== null && <em>최저</em>}{formatPrice(totalPrice(p))}
+                  <small>{shippingLabel(p)}</small>
                 </span>
               </article>
               {offers.length > 1 && <ul className="offer-list">{offers.map((o) => (
@@ -217,7 +221,8 @@ function App() {
                     {o.tags.map((tag) => <span key={tag} className={`tag tag-${tag}`}>{tagLabels[tag]}</span>)}
                     <span className={o.availability === "sold_out" ? "soldout" : ""}>{availabilityLabel(o)}</span>
                   </span>
-                  <span className={`result-price ${o.availability === "sold_out" ? "soldout" : ""}`}>{formatPrice(o.price)}</span>
+                  <span className="offer-shipping">{shippingLabel(o)}</span>
+                  <span className={`result-price ${o.availability === "sold_out" ? "soldout" : ""}`}>{formatPrice(totalPrice(o))}</span>
                 </li>
               ))}</ul>}
             </div>

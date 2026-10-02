@@ -118,3 +118,5 @@ footer { border-top: 1px solid #3a3a3a; margin-top: 20px; padding-top: 12px; lin
 .offer-store { flex: 0 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .offer-meta { display: flex; flex: 1; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: #999; }
 .offer-list .result-price { font-size: 12px; }
+.result-price small { display: block; margin-top: 2px; color: #8a8a8a; font-size: 10px; text-align: right; text-decoration: none; }
+.offer-shipping { color: #8a8a8a; font-size: 11px; white-space: nowrap; }

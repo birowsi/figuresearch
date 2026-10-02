@@ -48,6 +48,8 @@ pub struct Product {
     pub query: String,
     /// Equal for listings of the same product across stores; empty if unknown.
     pub group_key: String,
+    /// The listing itself says shipping is free ("무료배송" in name or badges).
+    pub free_shipping: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +106,7 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
                 Availability::Unknown
             };
             let group_key = group::group_key(&raw.name, &classification.tags);
+            let free_shipping = normalize::compact_key(&format!("{} {}", raw.name, raw.badges)).contains("무료배송");
             let id = format!("{store}:{}", raw.url.as_deref().unwrap_or(&raw.name)).to_lowercase();
             Product {
                 id,
@@ -121,6 +124,7 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
                 missing: relevance.missing,
                 query: query_used.to_string(),
                 group_key,
+                free_shipping,
             }
         })
         .collect();
