@@ -24,6 +24,8 @@ export type Product = {
   relevant: boolean;
   missing: string[];
   query: string;
+  /** Same for listings of the same product across stores (computed in Rust); empty if unknown. */
+  groupKey: string;
 };
 
 export type StoreResult = {
@@ -122,31 +124,8 @@ export function sortProducts(products: Product[], sort: SortKey) {
   return [...products].sort((a, b) => compareProducts(a, b, sort));
 }
 
-// Words stores add around the real product name (sale state, shipping, origin).
-const noiseWords = new Set([
-  "예약", "예약판매", "예약상품", "선주문", "재판", "재입고", "입고", "입고완료", "발매", "출시", "발송", "예정",
-  "당일발송", "즉시발송", "빠른배송", "무료배송", "정품", "신품", "새상품", "미개봉", "국내", "국내정발", "정발",
-  "일본", "일본판", "해외", "특전", "한정", "마감", "품절", "판매중", "재고", "pre", "order", "preorder",
-]);
-const datePattern = /^(\d+(년|월|일|차))+$/;
-
-const hiraganaToKatakana = (text: string) =>
-  text.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
-
-/**
- * Key that is equal for listings of the same product across stores: noise words
- * and dates dropped, case/width/kana folded, word order ignored. Used and
- * bootleg listings never merge with new ones.
- */
-export function productKey(p: Product) {
-  const words = hiraganaToKatakana(p.name.normalize("NFKC").toLowerCase())
-    .replace(/[^\p{L}\p{N}/]+/gu, " ")
-    .split(" ")
-    .filter((w) => w && w !== "/" && !noiseWords.has(w) && !datePattern.test(w));
-  if (!words.length) return `id:${p.id}`;
-  const condition = [p.tags.includes("used") ? "used" : "", p.tags.includes("bootleg") ? "bootleg" : ""].join(",");
-  return `${condition}|${words.sort().join(" ")}`;
-}
+/** Listings with the same key are the same product; used and bootleg listings stay apart. */
+export const productKey = (p: Product) => p.groupKey || `id:${p.id}`;
 
 export type ProductGroup = {
   key: string;

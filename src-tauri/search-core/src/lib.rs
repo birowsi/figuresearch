@@ -6,6 +6,7 @@
 
 pub mod classify;
 pub mod extract;
+pub mod group;
 pub mod html;
 pub mod normalize;
 pub mod query;
@@ -45,6 +46,8 @@ pub struct Product {
     /// Query words missing from the name (for "why was this hidden?").
     pub missing: Vec<String>,
     pub query: String,
+    /// Equal for listings of the same product across stores; empty if unknown.
+    pub group_key: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +103,7 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
             } else {
                 Availability::Unknown
             };
+            let group_key = group::group_key(&raw.name, &classification.tags);
             let id = format!("{store}:{}", raw.url.as_deref().unwrap_or(&raw.name)).to_lowercase();
             Product {
                 id,
@@ -116,6 +120,7 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
                 relevant: relevance.passed,
                 missing: relevance.missing,
                 query: query_used.to_string(),
+                group_key,
             }
         })
         .collect();

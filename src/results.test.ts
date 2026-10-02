@@ -6,7 +6,7 @@ import {
 const product = (overrides: Partial<Product>): Product => ({
   id: `${overrides.store ?? "A"}:${overrides.name ?? "x"}`, store: "A", name: "x", url: null, price: null, imageUrl: null,
   availability: "in_stock", category: "nendoroid", tags: [], release: null, relevance: 1,
-  relevant: true, missing: [], query: "q", ...overrides,
+  relevant: true, missing: [], query: "q", groupKey: "", ...overrides,
 });
 
 const products = [
@@ -43,22 +43,19 @@ describe("result filtering", () => {
 });
 
 describe("grouping identical products", () => {
-  it("ignores store noise, spacing of punctuation, width and word order", () => {
-    const key = productKey(product({ name: "넨도로이드 하츠네 미쿠 2301" }));
-    expect(productKey(product({ name: "[예약] 넨도로이드 하츠네 미쿠 #2301 (25년 3월 발매)" }))).toBe(key);
-    expect(productKey(product({ name: "하츠네 미쿠 넨도로이드 ２３０１ 국내정발" }))).toBe(key);
-    expect(productKey(product({ name: "넨도로이드 하츠네 미쿠 2302" }))).not.toBe(key);
-    expect(productKey(product({ name: "넨도로이드 하츠네 미쿠 2301", tags: ["used"] }))).not.toBe(key);
-  });
-
-  it("merges listings and orders offers and groups by lowest price", () => {
+  it("merges listings with the same key and orders offers and groups by lowest price", () => {
     const groups = groupProducts([
-      product({ store: "A", name: "넨도로이드 미쿠", price: 52000 }),
-      product({ store: "B", name: "[예약] 넨도로이드 미쿠", price: 48000 }),
-      product({ store: "C", name: "넨도로이드 미쿠", price: 30000, availability: "sold_out" }),
-      product({ store: "A", name: "figma 미쿠", price: 50000 }),
+      product({ store: "A", name: "넨도로이드 미쿠", price: 52000, groupKey: "miku" }),
+      product({ store: "B", name: "[예약] 넨도로이드 미쿠", price: 48000, groupKey: "miku" }),
+      product({ store: "C", name: "넨도로이드 미쿠", price: 30000, availability: "sold_out", groupKey: "miku" }),
+      product({ store: "A", name: "figma 미쿠", price: 50000, groupKey: "figma" }),
     ], "price-asc");
     expect(groups.map((g) => g.best.name)).toEqual(["[예약] 넨도로이드 미쿠", "figma 미쿠"]);
     expect(groups[0].offers.map((p) => p.store)).toEqual(["B", "A", "C"]);
+  });
+
+  it("never merges listings without a key", () => {
+    expect(groupProducts([product({ store: "A" }), product({ store: "B" })], "price-asc")).toHaveLength(2);
+    expect(productKey(product({ store: "A" }))).not.toBe(productKey(product({ store: "B" })));
   });
 });
