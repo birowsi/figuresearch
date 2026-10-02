@@ -158,12 +158,29 @@ pub fn product_key(link: &str) -> Option<String> {
             return Some(format!("product:{id}"));
         }
     }
-    for key in ["product_no", "goodsno", "goods_no", "it_id", "item_id", "itemid", "prd_no", "pid", "branduid"] {
+    for key in ["product_no", "goodsno", "goods_no", "it_id", "item_id", "itemid", "itemno", "prd_no", "pid", "pno", "branduid"] {
         if let Some(v) = param(key).filter(|v| v.chars().any(|c| c.is_ascii_digit())) {
             return Some(format!("product:{v}"));
         }
     }
     None
+}
+
+/// Where clicking this element goes: a real `href`, or `location.href='…'` in
+/// an `onclick` (shops that render product names as clickable `<dd>`/`<div>`).
+fn element_link(doc: &Document, id: NodeId) -> Option<&str> {
+    if let Some(href) = doc.attr(id, "href").filter(|_| matches!(doc.tag(id), Some("a" | "area"))).map(str::trim) {
+        let lower = href.to_ascii_lowercase();
+        if !href.is_empty() && !href.starts_with('#') && !lower.starts_with("javascript:") {
+            return Some(href);
+        }
+    }
+    let onclick = doc.attr(id, "onclick")?;
+    let after = &onclick[onclick.find("location.href")? + "location.href".len()..];
+    let after = after.trim_start().strip_prefix('=')?.trim_start();
+    let quote = after.chars().next().filter(|c| matches!(c, '\'' | '"'))?;
+    let rest = &after[1..];
+    rest.find(quote).map(|end| &rest[..end])
 }
 
 fn same_site(a: &str, b: &str) -> bool {
@@ -230,7 +247,9 @@ pub fn page_signal(doc: &Document, final_url: &str) -> PageSignal {
     ];
     if BOT.iter().any(|w| text.contains(w)) {
         PageSignal::BotChallenge
-    } else if url::host(&lower_url).starts_with("nid.naver.com") || url::path(&lower_url).contains("login") {
+    } else if url::host(&lower_url).starts_with("nid.naver.com")
+        || ["login", "adult"].iter().any(|w| url::path(&lower_url).contains(w))
+    {
         PageSignal::LoginPage
     } else if EMPTY.iter().any(|w| text.contains(w)) {
         PageSignal::EmptyMessage
@@ -246,10 +265,7 @@ pub fn extract(html: &str, page_url: &str, platform: Platform) -> Extraction {
     // 1. product links
     let mut link_keys: Vec<(NodeId, String, String)> = Vec::new(); // (anchor, key, absolute url)
     for id in doc.elements() {
-        if doc.tag(id) != Some("a") {
-            continue;
-        }
-        let Some(href) = doc.attr(id, "href") else { continue };
+        let Some(href) = element_link(&doc, id) else { continue };
         let Some(abs) = url::resolve(page_url, href) else { continue };
         if !same_site(&abs, page_url) {
             continue;
@@ -367,11 +383,7 @@ fn read_name(doc: &Document, card: NodeId, key: &str, page_url: &str) -> Option<
     // Longest visible text among this product's links.
     let mut link_text: Option<String> = None;
     for &id in std::iter::once(&card).chain(nodes.iter()) {
-        if doc.tag(id) != Some("a") {
-            continue;
-        }
-        let same = doc
-            .attr(id, "href")
+        let same = element_link(doc, id)
             .and_then(|h| url::resolve(page_url, h))
             .and_then(|u| product_key(&u))
             .is_some_and(|k| k == key);
@@ -596,6 +608,8 @@ mod tests {
         assert_eq!(product_key("https://a.kr/product/search.html?keyword=x"), None);
         assert_eq!(product_key("https://a.kr/board/product/read.html?no=1&product_no=3"), None);
         assert_eq!(product_key("https://a.kr/goods/goods_list.php?cateCd=001"), None);
+        assert_eq!(product_key("https://a.kr/shop/detail.php?pno=E836B7&ctype=1").as_deref(), Some("product:e836b7"));
+        assert_eq!(product_key("https://a.kr/mall/Itemdetails.php?cate=&itemno=1376428277").as_deref(), Some("product:1376428277"));
     }
 
     #[test]

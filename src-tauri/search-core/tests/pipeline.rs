@@ -130,3 +130,28 @@ fn charset_sniffing() {
     assert_eq!(search_core::sniff_charset(None, b"<meta charset=\"utf-8\">").as_deref(), Some("utf-8"));
     assert_eq!(search_core::sniff_charset(None, b"<html>"), None);
 }
+
+#[test]
+fn reads_products_linked_only_from_onclick() {
+    let html = r#"<ul class="prd_list">
+      <li><img src="/img/a.jpg"><dl>
+        <dd class="name" onClick="javascript:location.href='https://www.1004gundam.co.kr/mall/Itemdetails.php?cate=&itemno=11'">[예약] 넨도로이드 하츠네 미쿠</dd>
+        <dd class="price">77,500원</dd></dl></li>
+      <li><img src="/img/b.jpg"><dl>
+        <dd class="name" onclick="location.href='/mall/Itemdetails.php?itemno=12'">figma 하츠네 미쿠</dd>
+        <dd class="price">85,800원</dd></dl></li>
+    </ul>"#;
+    let url = "https://www.1004gundam.co.kr/mall/search.php?q=x";
+    let out = process_html("천사건담", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, html);
+    assert_eq!(out.status, PageStatus::Results);
+    let found: Vec<(&str, Option<u64>)> = out.products.iter().map(|p| (p.name.as_str(), p.price)).collect();
+    assert!(found.contains(&("[예약] 넨도로이드 하츠네 미쿠", Some(77_500))), "{found:?}");
+    assert!(found.contains(&("figma 하츠네 미쿠", Some(85_800))), "{found:?}");
+}
+
+#[test]
+fn adult_verification_redirect_is_login_required() {
+    let url = "https://figuresailer.com/intro/adult_i.html?returnUrl=%2Fproduct%2Fsearch.html";
+    let out = process_html("피규어세일러", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, "<html><body>성인인증</body></html>");
+    assert_eq!(out.status, PageStatus::LoginRequired);
+}

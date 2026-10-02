@@ -380,6 +380,30 @@ fn debug_capture_enabled() -> bool {
     cfg!(debug_assertions) || std::env::var("FIGURESEARCH_DEBUG").is_ok_and(|v| v == "1")
 }
 
+const KEPT_CAPTURES: usize = 10;
+
+fn is_page_failure(status: PageStatus) -> bool {
+    matches!(
+        status,
+        PageStatus::Unparsed | PageStatus::LoginRequired | PageStatus::RateLimited | PageStatus::Blocked | PageStatus::HttpError
+    )
+}
+
+/// Keeps only the newest `keep` capture folders.
+fn prune_captures(logs: &std::path::Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(logs) else { return };
+    let mut dirs: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("search-")))
+        .collect();
+    dirs.sort_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
+    let excess = dirs.len().saturating_sub(keep);
+    for dir in dirs.into_iter().take(excess) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 fn safe_file_name(value: &str) -> String {
     value.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
 }
@@ -387,11 +411,16 @@ fn safe_file_name(value: &str) -> String {
 /// Saves the raw page and a parse summary under the app's log folder so store
 /// layouts can be turned into test fixtures.
 fn write_debug_artifact(app: &AppHandle, search_id: &str, site: &Site, query: &str, target: &str, page: &Fetched, outcome: &search_core::PageOutcome) {
-    if !debug_capture_enabled() {
+    // Failed pages are always kept so a bad search can be diagnosed afterwards.
+    if !debug_capture_enabled() && !is_page_failure(outcome.status) {
         return;
     }
     let Ok(base) = app.path().app_local_data_dir() else { return };
-    let directory = base.join("logs").join(format!("search-{}", safe_file_name(search_id)));
+    let logs = base.join("logs");
+    let directory = logs.join(format!("search-{}", safe_file_name(search_id)));
+    if !directory.exists() {
+        prune_captures(&logs, KEPT_CAPTURES - 1);
+    }
     if std::fs::create_dir_all(&directory).is_err() {
         return;
     }
@@ -413,6 +442,23 @@ fn write_debug_artifact(app: &AppHandle, search_id: &str, site: &Site, query: &s
     });
     let _ = std::fs::write(directory.join(format!("{stem}.html")), &page.body);
     let _ = std::fs::write(directory.join(format!("{stem}.json")), serde_json::to_string_pretty(&report).unwrap_or_default());
+}
+
+fn log_store_result(result: &StoreResult) {
+    let level = if is_page_failure(result.status) || result.status == PageStatus::NetworkError { log::Level::Warn } else { log::Level::Info };
+    log::log!(
+        level,
+        "[search] {} status={:?} relevant={} hidden={} {}ms{}",
+        result.store, result.status, result.relevant, result.hidden, result.duration_ms,
+        result.message.as_deref().map(|m| format!(" message={m:?}")).unwrap_or_default()
+    );
+    for a in &result.attempts {
+        log::log!(
+            level,
+            "[search]   query={:?} http={} status={:?} products={} relevant={} {}ms url={}",
+            a.query, a.http_status.map_or("-".into(), |s| s.to_string()), a.status, a.products, a.relevant, a.duration_ms, a.url
+        );
+    }
 }
 
 // ---------------------------------------------------------------- commands
@@ -461,6 +507,7 @@ async fn search_stores(app: AppHandle, search_id: String, term: String, stores: 
         *latest = search_id.clone();
     }
     let total = selected.len();
+    log::info!("[search] start id={search_id} term={term:?} stores={total}");
     let queue = Arc::new(Mutex::new(host_groups(selected)));
     let workers = WORKERS.min(queue.lock().map(|q| q.len()).unwrap_or(1)).max(1);
     let mut handles = Vec::with_capacity(workers);
@@ -475,10 +522,7 @@ async fn search_stores(app: AppHandle, search_id: String, term: String, stores: 
                         return;
                     }
                     let result = search_store(&app, &search_id, &site, &analysis).await;
-                    log::info!(
-                        "[search] {} status={:?} relevant={} hidden={} attempts={}",
-                        result.store, result.status, result.relevant, result.hidden, result.attempts.len()
-                    );
+                    log_store_result(&result);
                     if is_current(&search_id) {
                         let _ = app.emit("search-store", result);
                     }
