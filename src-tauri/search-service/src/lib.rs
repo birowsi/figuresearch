@@ -168,6 +168,27 @@ pub struct Attempt {
     relevant: usize,
     encoding_fallback: bool,
     duration_ms: u64,
+    /// For pages that could not be read: what the store actually sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page: Option<PageSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSummary {
+    final_url: String,
+    bytes: usize,
+    title: String,
+    /// Start of the visible text, to recognize block or notice pages.
+    text: String,
+}
+
+fn summarize_page(page: &Fetched) -> PageSummary {
+    let doc = search_core::html::Document::parse(&page.body);
+    let title = doc.elements().find(|&id| doc.tag(id) == Some("title")).map(|id| doc.text(id)).unwrap_or_default();
+    let body = doc.elements().find(|&id| doc.tag(id) == Some("body")).unwrap_or(0);
+    let text: String = doc.text(body).split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
+    PageSummary { final_url: page.final_url.clone(), bytes: page.body.len(), title: title.trim().to_string(), text }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,6 +284,7 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
             result.search_url = Some(target.clone());
         }
         let attempt_started = Instant::now();
+        let mut summary = None;
         let (status, http_status, products) = if site.platform == Platform::Bunjang {
             search_bunjang(site, analysis, query, &encoded).await
         } else {
@@ -270,6 +292,9 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
                 Ok(page) => {
                     let outcome = process_html(&site.name, site.platform, analysis, query, page.status, &page.final_url, &page.body);
                     write_debug_artifact(capture_dir, search_id, site, query, &target, &page, &outcome);
+                    if is_page_failure(outcome.status) {
+                        summary = Some(summarize_page(&page));
+                    }
                     (outcome.status, Some(page.status), outcome.products)
                 }
                 Err(error) => {
@@ -288,6 +313,7 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
             relevant,
             encoding_fallback,
             duration_ms: attempt_started.elapsed().as_millis() as u64,
+            page: summary,
         });
         let better = best.as_ref().is_none_or(|(b, _, _)| relevant > b.iter().filter(|p| p.relevant).count() || (relevant == 0 && b.is_empty() && !products.is_empty()));
         if better {
@@ -459,6 +485,9 @@ fn log_store_result(result: &StoreResult) {
             "[search]   query={:?} http={} status={:?} products={} relevant={} {}ms url={}",
             a.query, a.http_status.map_or("-".into(), |s| s.to_string()), a.status, a.products, a.relevant, a.duration_ms, a.url
         );
+        if let Some(page) = &a.page {
+            log::log!(level, "[search]     page bytes={} title={:?} final={} text={:?}", page.bytes, page.title, page.final_url, page.text);
+        }
     }
 }
 
