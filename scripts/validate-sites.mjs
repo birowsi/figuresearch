@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const data = JSON.parse(await readFile(new URL("../sites.json", import.meta.url), "utf8"));
 const errors = [];
-const platforms = ["cafe24", "godomall", "makeshop", "youngcart", "imweb", "aladin", "yes24", "naver_store", "bunjang", "generic"];
+const platforms = ["cafe24", "godomall", "makeshop", "youngcart", "imweb", "aladin", "yes24", "naver_store", "generic"];
 const languages = ["korean", "japanese", "english"];
 const names = new Set();
 

@@ -24,12 +24,10 @@
         {"name": "따빼몰", "url": "https://ttabbaemall.co.kr/product/search.html?banner_action=&keyword={input}", "shipping": {"fee": 0}},
         {"name": "래빗츠컴퍼니", "url": "https://rabbits.kr/product/search.html?banner_action=&keyword={input}", "shipping": {"fee": 3000, "freeOver": 70000}},
         {"name": "모리무리", "url": "https://morimuri.co.kr/product/search.html?banner_action=&keyword={input}", "shipping": {"fee": 3000}},
-        {"name": "피규어세일러", "url": "https://figuresailer.com/product/search.html?banner_action=&keyword={input}"},
         {"name": "페간샵", "url": "https://smartstore.naver.com/pjh_2019/search?q={input}"},
         {"name": "알라딘", "url": "https://www.aladin.co.kr/search/wsearchresult.aspx?SearchTarget=All&SearchWord={input}"},
         {"name": "예스24", "url": "https://www.yes24.com/Product/Search?domain=ALL&query={input}"},
-		{"name": "하비다모아", "url": "https://hobbydamoa.com/product/search.html?banner_action=&keyword={input}", "shipping": {"fee": 3000, "freeOver": 100000}},
-		{"name": "번개장터", "url": "https://m.bunjang.co.kr/search/products?q={input}"}
+		{"name": "하비다모아", "url": "https://hobbydamoa.com/product/search.html?banner_action=&keyword={input}", "shipping": {"fee": 3000, "freeOver": 100000}}
     ],
     "EUC-KR": [
         {"name": "천사건담", "url": "https://www.1004gundam.co.kr/mall/search.php?q={input}", "profile": {"eucKrFallback": "UTF-8"}},

@@ -5,21 +5,30 @@
 //! folding every alias spelling ("하츠네 미쿠", "初音ミク", "Hatsune Miku") to one
 //! entry. Spacing is ignored, and so is the position of alias words.
 
-use crate::classify::Tag;
-use crate::normalize::{compact_key, match_key};
+use crate::classify::{Category, Tag};
+use crate::normalize::{compact_key, grouping_title_key};
 use crate::query::aliases;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 /// Words stores add around the real product name.
 const NOISE: &[&str] = &[
-    "예약", "예약판매", "예약상품", "선주문", "재판", "재입고", "입고", "입고완료", "발매", "출시", "발송", "예정",
+    "예약", "예약판매", "예약상품", "선주문", "재판", "재입고", "입고", "입고완료", "입고예정", "발매", "출시", "발송", "예정",
     "당일발송", "즉시발송", "빠른배송", "무료배송", "정품", "신품", "새상품", "미개봉", "국내", "국내정발", "정발",
-    "일본", "일본판", "해외", "특전", "한정", "마감", "품절", "판매중", "재고", "pre", "order", "preorder",
+    "일본", "일본판", "해외", "마감", "품절", "판매중", "재고", "pre", "order", "preorder",
+    "ver", "version", "버전", "초특가", "특가",
 ];
 
 /// "25년", "3월", "2차", "25년3월".
 fn is_date(word: &str) -> bool {
+    let word = ["중입고예정", "입고예정", "입고완료", "입하예정", "입하", "입고", "발매예정", "발매"]
+        .iter().find_map(|suffix| word.strip_suffix(suffix)).unwrap_or(word);
+    if let Some((year, month)) = word.split_once('.')
+        && year.len() == 4 && year.parse::<u16>().is_ok_and(|n| (2000..=2099).contains(&n))
+        && month.len() <= 2 && month.parse::<u8>().is_ok_and(|n| (1..=12).contains(&n))
+    {
+        return true;
+    }
     let mut saw_digit = false;
     let mut complete = false;
     for c in word.chars() {
@@ -34,6 +43,10 @@ fn is_date(word: &str) -> bool {
         }
     }
     complete
+}
+
+fn is_product_number(word: &str) -> bool {
+    !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 struct Spelling {
@@ -78,10 +91,50 @@ fn strip_spellings(word: &str, found: &mut BTreeSet<usize>) -> String {
     rest.split_whitespace().collect()
 }
 
-/// Key shared by listings of the same product. Empty when nothing identifying is left.
-pub fn group_key(name: &str, tags: &[Tag]) -> String {
-    let key = match_key(name);
-    let words: Vec<&str> = key.split(' ').filter(|w| !w.is_empty() && !NOISE.contains(w) && !is_date(w)).collect();
+/// An exact grouping key and, for named figure editions, a key without the serial number.
+pub fn group_keys(name: &str, category: Category, tags: &[Tag]) -> (String, Option<String>) {
+    let serial_figure = matches!(category, Category::Nendoroid | Category::NendoroidDoll | Category::Figma);
+    let mut key = grouping_title_key(name);
+    if serial_figure {
+        // These labels describe the franchise, including 01 from its name.
+        key = format!(" {key} ");
+        for label in ["캐릭터 보컬 시리즈", "캐릭터보컬시리즈", "character vocal series"] {
+            key = key.replace(&format!(" {label} 01 "), " ")
+                .replace(&format!(" {label}01 "), " ")
+                .replace(&format!(" {label} "), " ");
+        }
+    }
+    let mut tokens = key.split_whitespace().peekable();
+    let mut words = Vec::new();
+    while let Some(word) = tokens.next() {
+        if NOISE.contains(&word) || is_date(word)
+            || (serial_figure && matches!(word, "vocaloid" | "보컬로이드" | "ボーカロイド" | "피규어" | "figure"))
+        {
+            continue;
+        }
+        if serial_figure && matches!(word, "no" | "넘버") && tokens.peek().is_some_and(|next| is_product_number(next)) {
+            continue;
+        }
+        let word = if serial_figure {
+            word.strip_prefix("no").or_else(|| word.strip_suffix('번')).filter(|number| is_product_number(number)).unwrap_or(word)
+        } else {
+            word
+        };
+        // Sellers write the same version as either "Ver.2.0" or "Ver2.0".
+        let word = word.strip_prefix("ver").filter(|version| version.starts_with(|c: char| c.is_ascii_digit()))
+            .or_else(|| word.strip_suffix("ver").filter(|name| name.chars().last().is_some_and(|c| !c.is_ascii() && c.is_alphabetic())))
+            .unwrap_or(word);
+        words.push(word);
+    }
+    let serial = if serial_figure {
+        let mut numbers = words.iter().copied().filter(|word| word.len() <= 5 && is_product_number(word));
+        numbers.next().filter(|_| numbers.next().is_none())
+    } else {
+        None
+    };
+    if let Some(number) = serial {
+        words.retain(|word| *word != number);
+    }
     let mut found = BTreeSet::new();
     let mut rest = String::new();
     let mut i = 0;
@@ -100,8 +153,8 @@ pub fn group_key(name: &str, tags: &[Tag]) -> String {
     // Manufacturers are often left out of names, so they never split a group.
     let identifying: Vec<String> =
         found.into_iter().filter(|&a| !aliases()[a].soft).map(|a| a.to_string()).collect();
-    if identifying.is_empty() && rest.is_empty() {
-        return String::new();
+    if identifying.is_empty() && rest.is_empty() && serial.is_none() {
+        return (String::new(), None);
     }
     let condition = match (tags.contains(&Tag::Used), tags.contains(&Tag::Bootleg)) {
         (true, true) => "used,bootleg",
@@ -109,7 +162,11 @@ pub fn group_key(name: &str, tags: &[Tag]) -> String {
         (false, true) => "bootleg",
         (false, false) => "new",
     };
-    format!("{condition}|{}|{rest}", identifying.join(","))
+    let bonus = if tags.contains(&Tag::Bonus) { "|bonus" } else { "" };
+    let title = format!("{category:?}|{condition}{bonus}|{}|{rest}", identifying.join(","));
+    let exact = serial.map_or_else(|| title.clone(), |number| format!("{title}|{number}"));
+    let named_edition = serial_figure && !identifying.is_empty() && rest.chars().any(char::is_alphabetic);
+    (exact, named_edition.then_some(title))
 }
 
 #[cfg(test)]
@@ -117,7 +174,7 @@ mod tests {
     use super::*;
 
     fn key(name: &str) -> String {
-        group_key(name, &[])
+        group_keys(name, Category::Nendoroid, &[]).0
     }
 
     #[test]
@@ -138,8 +195,37 @@ mod tests {
         assert_ne!(key("넨도로이드 하츠네 미쿠 2302"), base);
         assert_ne!(key("넨도로이드 돌 하츠네 미쿠 2301"), base);
         assert_ne!(key("figma 하츠네 미쿠 2301"), base);
-        assert_ne!(group_key("넨도로이드 하츠네 미쿠 2301", &[Tag::Used]), base);
+        assert_ne!(group_keys("넨도로이드 하츠네 미쿠 2301", Category::Nendoroid, &[Tag::Used]).0, base);
         assert_ne!(key("홀로그램 스티커"), key("홀로라이브 스티커"));
+    }
+
+    #[test]
+    fn groups_number_and_version_spellings_but_keeps_editions_and_bundles_separate() {
+        let name = "넨도로이드 하츠네 미쿠 3068 메스머라이저";
+        let base = key(name);
+        assert_eq!(key("[예약] Nendoroid Hatsune Miku No.3068 메스머라이저 Ver. 2026.11 입고"), base);
+        assert_eq!(key("넨도로이드 하츠네 미쿠 3068번 메스머라이저 버전"), base);
+        assert_eq!(key("넨도로이드 하츠네 미쿠 메스머라이저 No3068"), base);
+        assert_eq!(key("[신품][VOCALOID] 넨도로이드 No.3068 하츠네 미쿠 메스머라이저 Ver."), base);
+        assert_eq!(key("[26년11월입하]굿스마일 넨도로이드 3068 하츠네 미쿠 메스머라이저Ver."), base);
+        assert_eq!(key("[예약상품/26년 11월~12월 입고예정][굿스마일컴퍼니][보컬로이드] 넨도로이드 No.3068 캐릭터 보컬 시리즈 01: 하츠네 미쿠 메스머라이저 Ver."), base);
+        assert_eq!(key("[26년 10월 발매] 하츠네 미쿠 보컬로이드 굿스마일 컴퍼니 넨도로이드 3068 피규어 - 하츠네 미쿠 메스머라이저 Ver."), base);
+        assert_ne!(key(&format!("{name} 한정")), base);
+        assert_ne!(key(&format!("{name} 세트")), base);
+        assert_ne!(group_keys(name, Category::Nendoroid, &[Tag::Bonus]).0, base);
+        assert_ne!(group_keys(name, Category::Plamo, &[]).0, base);
+        let fallback = group_keys("<초특가> 넨도로이드 하츠네 미쿠 메스머라이저 ver.", Category::Nendoroid, &[]);
+        assert_eq!(group_keys(name, Category::Nendoroid, &[]).1, Some(fallback.0));
+        assert_eq!(
+            group_keys("넨도로이드 캐릭터 보컬 시리즈01 하츠네 미쿠 메스머라이저ver.", Category::Nendoroid, &[]).1,
+            group_keys(name, Category::Nendoroid, &[]).1,
+        );
+        assert!(group_keys("넨도로이드 하츠네 미쿠", Category::Nendoroid, &[]).1.is_none());
+
+        let kit = |name| group_keys(name, Category::Plamo, &[]).0;
+        assert_eq!(kit("RG RX-78-2 건담 Ver2.0"), kit("RG RX782 건담 Ver. 2.0"));
+        assert_ne!(kit("RG RX-78-2 건담 2.0"), kit("RG RX-78-2 건담 1.0"));
+        assert_ne!(kit("RG RX-78-2 건담 2.0"), kit("RG RX-78-2 건담 20"));
     }
 
     #[test]

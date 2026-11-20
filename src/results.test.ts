@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyFilters, categoryCounts, defaultFilters, formatPrice, groupProducts, lowestPrice, productKey, shippingLabel, totalPrice,
+  allMatchingProductsSoldOut, applyFilters, applyFiltersGrouped, categoryCounts, defaultFilters, formatPrice, groupProducts, lowestOffer, productKey, shippingLabel, totalPrice,
   withShipping, type Product,
 } from "./results";
 
@@ -13,7 +13,7 @@ const product = (overrides: Partial<Product>): Product => ({
 const products = [
   product({ name: "넨도 미쿠", price: 55000 }),
   product({ name: "넨도 미쿠 품절", price: 40000, availability: "sold_out" }),
-  product({ name: "중고 넨도", price: 30000, tags: ["used"], store: "번개장터" }),
+  product({ name: "중고 넨도", price: 30000, tags: ["used"], store: "B" }),
   product({ name: "figma 미쿠", category: "figma", relevant: false, relevance: 0.5, price: 10 }),
   product({ name: "미쿠 스케일", category: "scale_figure", price: null, relevance: 0.8 }),
 ];
@@ -36,10 +36,18 @@ describe("result filtering", () => {
   });
 
   it("counts categories and finds the lowest available relevant price", () => {
-    expect(categoryCounts(products, defaultFilters)).toEqual([["nendoroid", 3], ["scale_figure", 1]]);
-    expect(lowestPrice(products)).toBe(30000);
+    expect(categoryCounts(products, defaultFilters)).toEqual({ total: 4, categories: [["nendoroid", 3], ["scale_figure", 1]] });
+    expect(lowestOffer(products)?.price).toBe(30000);
     expect(formatPrice(58500)).toBe("58,500원");
     expect(formatPrice(null)).toBe("가격 정보 없음");
+  });
+
+  it("requires at least one match and confirmed sold-out status for every match", () => {
+    const soldOut = product({ availability: "sold_out" });
+    expect(allMatchingProductsSoldOut([])).toBe(false);
+    expect(allMatchingProductsSoldOut([soldOut, product({ relevant: false })])).toBe(true);
+    expect(allMatchingProductsSoldOut([soldOut, product({ availability: "unknown" })])).toBe(false);
+    expect(allMatchingProductsSoldOut([soldOut, product({ availability: "in_stock" })])).toBe(false);
   });
 });
 
@@ -58,6 +66,26 @@ describe("grouping identical products", () => {
   it("never merges listings without a key", () => {
     expect(groupProducts([product({ store: "A" }), product({ store: "B" })], "price-asc")).toHaveLength(2);
     expect(productKey(product({ store: "A" }))).not.toBe(productKey(product({ store: "B" })));
+  });
+
+  it("joins listings missing a number only if the named edition has a single known number", () => {
+    const unnamedNumber = product({ store: "A", groupKey: "mesmerizer", groupTitleKey: "mesmerizer" });
+    const numbered = product({ store: "B", groupKey: "mesmerizer|3068", groupTitleKey: "mesmerizer" });
+    const olderEdition = product({ store: "C", groupKey: "mesmerizer|3000", groupTitleKey: "mesmerizer", availability: "sold_out" });
+    expect(groupProducts([unnamedNumber, numbered], "relevance")).toHaveLength(1);
+    expect(categoryCounts([unnamedNumber, numbered], defaultFilters).total).toBe(1);
+    expect(groupProducts([unnamedNumber, numbered, olderEdition], "relevance")).toHaveLength(3);
+    expect(applyFiltersGrouped([unnamedNumber, numbered, olderEdition], { ...defaultFilters, hideSoldOut: true })).toHaveLength(2);
+  });
+
+  it("counts grouped products once and keeps related offers as representatives", () => {
+    const listings = [
+      product({ store: "A", price: 30000, groupKey: "miku" }),
+      product({ store: "B", price: 20000, groupKey: "miku" }),
+      product({ store: "C", price: 10000, groupKey: "miku", relevant: false, relevance: 0.5 }),
+    ];
+    expect(categoryCounts(listings, defaultFilters)).toEqual({ total: 1, categories: [["nendoroid", 1]] });
+    expect(groupProducts(listings, "relevance")[0].best.store).toBe("B");
   });
 });
 

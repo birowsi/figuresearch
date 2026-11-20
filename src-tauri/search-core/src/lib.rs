@@ -48,6 +48,9 @@ pub struct Product {
     pub query: String,
     /// Equal for listings of the same product across stores; empty if unknown.
     pub group_key: String,
+    /// Named figure edition, independent of a serial number omitted by a seller.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub group_title_key: Option<String>,
     /// The listing itself says shipping is free ("무료배송" in name or badges).
     pub free_shipping: bool,
 }
@@ -65,6 +68,7 @@ pub enum PageStatus {
     /// Page loaded but no product cards could be read.
     Unparsed,
     LoginRequired,
+    AgeVerificationRequired,
     RateLimited,
     Blocked,
     HttpError,
@@ -85,19 +89,39 @@ impl PageStatus {
 pub fn store_kind(platform: Platform) -> StoreKind {
     match platform {
         Platform::Aladin | Platform::Yes24 => StoreKind::Bookstore,
-        Platform::Bunjang => StoreKind::Marketplace,
         _ => StoreKind::Shop,
     }
 }
 
 /// Scores and classifies raw products. Returns products sorted best first.
 pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<RawProduct>, kind: StoreKind) -> Vec<Product> {
+    let query_category = classify::classify(&analysis.display, "", StoreKind::Shop).category;
+    let searches_for_figure = matches!(query_category, Category::Nendoroid | Category::NendoroidDoll | Category::Figma |
+        Category::PopUpParade | Category::ActionFigure | Category::PrizeFigure | Category::ScaleFigure | Category::Figure);
+    let searches_for_kit = query_category == Category::Plamo;
+    let requested_tags: Vec<_> = analysis.groups.iter().filter_map(|word| {
+        let tag = match normalize::match_key(&word.text).as_str() {
+            "중고" => Tag::Used,
+            "예약" => Tag::Preorder,
+            "재판" => Tag::Reissue,
+            _ => return None,
+        };
+        Some((&word.text, tag))
+    }).collect();
     let mut products: Vec<Product> = raws
         .into_iter()
         .filter(|raw| !raw.name.trim().is_empty())
         .map(|raw| {
-            let relevance = query::relevance(analysis, &raw.name);
+            let mut relevance = query::relevance(analysis, &raw.name);
             let classification = classify::classify(&raw.name, &raw.badges, kind);
+            for &(word, tag) in &requested_tags {
+                if !classification.tags.contains(&tag) && !relevance.missing.contains(word) {
+                    relevance.missing.push(word.clone());
+                }
+            }
+            let is_merchandise = matches!(classification.category, Category::Accessory | Category::Goods);
+            let category_mismatch = ((searches_for_figure || searches_for_kit) && is_merchandise)
+                || (searches_for_figure && classification.category == Category::Plamo);
             let availability = if raw.sold_out {
                 Availability::SoldOut
             } else if raw.price.is_some() {
@@ -105,9 +129,10 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
             } else {
                 Availability::Unknown
             };
-            let group_key = group::group_key(&raw.name, &classification.tags);
+            let (group_key, group_title_key) = group::group_keys(&raw.name, classification.category, &classification.tags);
             let free_shipping = normalize::compact_key(&format!("{} {}", raw.name, raw.badges)).contains("무료배송");
-            let id = format!("{store}:{}", raw.url.as_deref().unwrap_or(&raw.name)).to_lowercase();
+            let listing_key = raw.url.as_deref().and_then(extract::product_key);
+            let id = format!("{store}:{}", listing_key.as_deref().or(raw.url.as_deref()).unwrap_or(&raw.name)).to_lowercase();
             Product {
                 id,
                 store: store.to_string(),
@@ -120,10 +145,11 @@ pub fn evaluate(store: &str, query_used: &str, analysis: &Analysis, raws: Vec<Ra
                 tags: classification.tags,
                 release: classification.release,
                 relevance: relevance.score,
-                relevant: relevance.passed,
+                relevant: relevance.missing.is_empty() && !category_mismatch,
                 missing: relevance.missing,
                 query: query_used.to_string(),
                 group_key,
+                group_title_key,
                 free_shipping,
             }
         })
@@ -176,24 +202,23 @@ pub fn process_html(
         return PageOutcome { status: PageStatus::RateLimited, products: vec![], product_links: 0, scoped: false };
     }
     let extraction = extract::extract(html, final_url, platform);
+    let response_error = match extraction.signal {
+        extract::PageSignal::LoginPage => Some(PageStatus::LoginRequired),
+        extract::PageSignal::AgeVerification => Some(PageStatus::AgeVerificationRequired),
+        _ if matches!(http_status, 401 | 403) => Some(PageStatus::Blocked),
+        _ if http_status >= 400 || http_status == 204 => Some(PageStatus::HttpError),
+        _ => None,
+    };
+    if let Some(status) = response_error {
+        return PageOutcome { status, products: vec![], product_links: extraction.product_links, scoped: extraction.scoped };
+    }
     let products = evaluate(store, query_used, analysis, extraction.products, store_kind(platform));
-    let relevant = products.iter().filter(|p| p.relevant).count();
-    let status = if relevant > 0 {
-        PageStatus::Results
-    } else if !products.is_empty() {
-        PageStatus::NoRelevant
-    } else {
-        match extraction.signal {
-            extract::PageSignal::BotChallenge => PageStatus::Blocked,
-            extract::PageSignal::LoginPage => PageStatus::LoginRequired,
-            _ if matches!(http_status, 401 | 403) => PageStatus::Blocked,
-            _ if http_status >= 400 => PageStatus::HttpError,
-            // 204 means the search endpoint answered without a page (moved or disabled).
-            _ if http_status == 204 => PageStatus::HttpError,
-            extract::PageSignal::EmptyMessage => PageStatus::Empty,
-            _ if html.trim().is_empty() => PageStatus::Empty,
-            _ => PageStatus::Unparsed,
-        }
+    let status = match extraction.signal {
+        _ if products.iter().any(|p| p.relevant) => PageStatus::Results,
+        _ if !products.is_empty() => PageStatus::NoRelevant,
+        extract::PageSignal::BotChallenge => PageStatus::Blocked,
+        extract::PageSignal::EmptyMessage => PageStatus::Empty,
+        _ => PageStatus::Unparsed,
     };
     PageOutcome { status, products, product_links: extraction.product_links, scoped: extraction.scoped }
 }

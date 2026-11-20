@@ -25,7 +25,6 @@ pub enum Platform {
     Aladin,
     Yes24,
     NaverStore,
-    Bunjang,
     Generic,
 }
 
@@ -40,7 +39,6 @@ impl Platform {
             Platform::Aladin => "aladin",
             Platform::Yes24 => "yes24",
             Platform::NaverStore => "naver_store",
-            Platform::Bunjang => "bunjang",
             Platform::Generic => "generic",
         }
     }
@@ -55,7 +53,6 @@ impl Platform {
             "aladin" => Platform::Aladin,
             "yes24" => Platform::Yes24,
             "naver_store" | "naver" => Platform::NaverStore,
-            "bunjang" => Platform::Bunjang,
             "generic" => Platform::Generic,
             _ => return None,
         })
@@ -67,8 +64,6 @@ pub fn detect_platform(template: &str) -> Platform {
     let lower = template.to_ascii_lowercase();
     if host.ends_with("smartstore.naver.com") || host.ends_with("brand.naver.com") || host == "shopping.naver.com" {
         Platform::NaverStore
-    } else if host.ends_with("bunjang.co.kr") {
-        Platform::Bunjang
     } else if host.ends_with("aladin.co.kr") {
         Platform::Aladin
     } else if host.ends_with("yes24.com") {
@@ -105,6 +100,7 @@ pub enum PageSignal {
     EmptyMessage,
     BotChallenge,
     LoginPage,
+    AgeVerification,
 }
 
 #[derive(Debug, Clone)]
@@ -247,10 +243,13 @@ pub fn page_signal(doc: &Document, final_url: &str) -> PageSignal {
         "등록된 상품이 없습니다", "일치하는 상품이 없습니다", "검색어와 일치하는",
         "검색결과 0개", "검색 결과 0개", "검색결과 0건", "검색 결과 0건", "검색결과(0)", "검색 결과(0)",
     ];
-    if BOT.iter().any(|w| text.contains(w)) || url::path(&lower_url).contains("/challenge") {
+    let path = url::path(&lower_url);
+    if path.split('/').any(|segment| matches!(segment, "adult" | "adult_i.html" | "adult.html")) {
+        PageSignal::AgeVerification
+    } else if BOT.iter().any(|w| text.contains(w)) || path.contains("/challenge") {
         PageSignal::BotChallenge
     } else if url::host(&lower_url).starts_with("nid.naver.com")
-        || ["login", "adult"].iter().any(|w| url::path(&lower_url).contains(w))
+        || path.contains("login")
     {
         PageSignal::LoginPage
     } else if EMPTY.iter().any(|w| text.contains(w)) {
@@ -631,7 +630,6 @@ mod tests {
         assert_eq!(detect_platform("https://figurepresso.com/product/search.html?banner_action=&keyword={input}"), Platform::Cafe24);
         assert_eq!(detect_platform("https://www.comiczone.co.kr/goods/goods_search.php?keyword={input}"), Platform::Godomall);
         assert_eq!(detect_platform("https://smartstore.naver.com/x/search?q={input}"), Platform::NaverStore);
-        assert_eq!(detect_platform("https://m.bunjang.co.kr/search/products?q={input}"), Platform::Bunjang);
         assert_eq!(detect_platform("https://www.comicct.com/shop/search_result.php?search_str={input}"), Platform::MakeShop);
     }
 }

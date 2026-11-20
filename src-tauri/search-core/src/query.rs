@@ -330,31 +330,51 @@ fn render(analysis: &Analysis, language: Option<Language>, skip_soft: bool) -> S
         .join(" ")
 }
 
-/// Queries to send to a store, best first. Stores are tried with at most the
-/// first two; the rest are kept for diagnostics.
+/// Queries to send to a store, best first. Broader retrieval still uses the
+/// full analysis to verify product names.
 pub fn query_candidates(analysis: &Analysis, preferred: Option<Language>) -> Vec<String> {
-    let original = render(analysis, None, false);
-    let core_only = render(analysis, None, true);
-    let mut out = Vec::new();
-    match preferred {
-        Some(language) => {
-            out.push(render(analysis, Some(language), false));
-            out.push(render(analysis, Some(language), true));
-            out.push(original);
-        }
-        None => {
-            out.push(original);
-            out.push(render(analysis, Some(Language::Korean), false));
-            out.push(core_only);
+    let language = preferred.or(Some(Language::Korean));
+    let primary = if preferred.is_some() { render(analysis, preferred, false) } else { analysis.display.clone() };
+    let mut candidates = vec![
+        primary,
+        render(analysis, language, true),
+        render(analysis, None, true),
+        render(analysis, language, false),
+        analysis.display.clone(),
+    ];
+    let required: Vec<_> = analysis.groups.iter().filter(|g| g.kind != TermKind::Soft).collect();
+    if preferred.is_none() && required.len() == 2 && required.iter().all(|g| g.kind == TermKind::Core) {
+        // A compact character/series alias can fetch matches from storefronts
+        // that treat a multi-word search as a literal phrase.
+        for alias in required.iter().filter_map(|g| g.alias.map(|index| &aliases()[index])) {
+            if alias.korean[0].contains(' ')
+                && let Some(short) = alias.abbreviations.iter().find(|term| term.chars().all(is_hangul)) {
+                candidates.push(short.clone());
+            }
         }
     }
-    let mut unique: Vec<String> = Vec::new();
-    for candidate in out {
-        if !candidate.trim().is_empty() && !unique.iter().any(|u| compact_key(u) == compact_key(&candidate)) {
-            unique.push(candidate);
-        }
+    if required.len() >= 3 {
+        let mut core_count = 0;
+        let shorter = required.into_iter().filter(|g| {
+            if g.kind == TermKind::Identifier {
+                return true;
+            }
+            core_count += 1;
+            core_count <= 2
+        }).map(|g| g.text.as_str()).collect::<Vec<_>>().join(" ");
+        candidates.push(shorter);
     }
-    unique
+    if let Some(code) = analysis.identifiers().find(|identifier| {
+        let key = compact_key(&identifier.text);
+        key.len() >= 3 && !key.contains('/')
+    }) {
+        candidates.push(code.text.clone());
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates.into_iter().filter(|candidate| {
+        let key = match_key(candidate);
+        !key.is_empty() && seen.insert(key)
+    }).collect()
 }
 
 /// A product name prepared for matching.
@@ -398,8 +418,26 @@ fn alternative_matches(alt: &Alternative, name: &NameKey) -> bool {
         }
         MatchRule::AsciiBoundary => {
             let blocks = |c: char| c.is_ascii_alphanumeric();
-            bounded_occurrence(&name.spaced, &alt.key, blocks)
-                || (alt.key.contains(' ') && bounded_occurrence(&name.compact, &alt.compact, blocks))
+            if bounded_occurrence(&name.spaced, &alt.key, blocks) {
+                return true;
+            }
+            // Model codes appear with or without separators (RX-78-2 / RX782).
+            if alt.compact.bytes().any(|b| b.is_ascii_digit()) && alt.compact.bytes().any(|b| b.is_ascii_alphabetic()) {
+                return name.tokens.iter().enumerate().any(|(start, _)| {
+                    let mut end = 0;
+                    for token in &name.tokens[start..] {
+                        if !alt.compact[end..].starts_with(token) {
+                            return false;
+                        }
+                        end += token.len();
+                        if end == alt.compact.len() {
+                            return true;
+                        }
+                    }
+                    false
+                });
+            }
+            alt.key.contains(' ') && bounded_occurrence(&name.compact, &alt.compact, blocks)
         }
         MatchRule::Contains => name.compact.contains(&alt.compact),
         MatchRule::TokenAffix => name.tokens.iter().any(|t| t.starts_with(&alt.compact) || t.ends_with(&alt.compact)),
@@ -421,8 +459,7 @@ pub struct Relevance {
 
 /// Decides whether a product name actually answers the query.
 ///
-/// Every identifier (product number, scale, JAN) must match. Core words must
-/// all match for short queries; long queries tolerate one miss per three words.
+/// Core words and identifiers (product number, scale, JAN) must all match.
 /// Soft words (manufacturers, "피규어", "정품"...) only adjust the score.
 pub fn relevance(analysis: &Analysis, name: &str) -> Relevance {
     if analysis.groups.is_empty() {
@@ -432,9 +469,6 @@ pub fn relevance(analysis: &Analysis, name: &str) -> Relevance {
     let mut total = 0.0;
     let mut gained = 0.0;
     let mut missing = Vec::new();
-    let mut core_total = 0usize;
-    let mut core_missed = 0usize;
-    let mut identifier_missed = false;
     for group in &analysis.groups {
         let weight = match group.kind {
             TermKind::Core => 1.0,
@@ -446,27 +480,11 @@ pub fn relevance(analysis: &Analysis, name: &str) -> Relevance {
         if hit {
             gained += weight;
         }
-        match group.kind {
-            TermKind::Core => {
-                core_total += 1;
-                if !hit {
-                    core_missed += 1;
-                    missing.push(group.text.clone());
-                }
-            }
-            TermKind::Identifier if !hit => {
-                identifier_missed = true;
-                missing.push(group.text.clone());
-            }
-            _ => {}
+        if !hit && group.kind != TermKind::Soft {
+            missing.push(group.text.clone());
         }
     }
-    let allowed_misses = core_total.saturating_sub(1) / 3;
-    let has_required = core_total > 0 || analysis.identifiers().next().is_some();
-    let passed = !identifier_missed && core_missed <= allowed_misses && (has_required || gained > 0.0 || total == 0.0);
-    // Pure soft queries ("피규어") accept anything the store returned.
-    let passed = passed || !has_required;
-    Relevance { score: if total > 0.0 { gained / total } else { 1.0 }, passed, missing }
+    Relevance { score: if total > 0.0 { gained / total } else { 1.0 }, passed: missing.is_empty(), missing }
 }
 
 #[cfg(test)]
@@ -544,20 +562,32 @@ mod tests {
     }
 
     #[test]
-    fn long_queries_tolerate_one_missing_word() {
+    fn long_queries_match_compound_words_but_require_the_character() {
         assert!(passes("블루 아카이브 아리스 바니 걸 버전", "블루 아카이브 아리스 바니걸 1/7"));
-        assert!(!passes("블루 아카이브 아리스", "블루 아카이브 유우카 1/7"));
+        assert!(!passes("블루 아카이브 아리스 바니 걸 버전", "블루 아카이브 유우카 바니걸 1/7"));
     }
 
     #[test]
-    fn candidates_prefer_original_then_korean_alias_then_core() {
+    fn fallback_combines_local_aliases_and_removes_soft_words() {
         let a = analyze("初音ミク ねんどろいど 피규어");
         let c = query_candidates(&a, None);
         assert_eq!(c[0], "初音ミク ねんどろいど 피규어");
-        assert_eq!(c[1], "하츠네 미쿠 넨도로이드 피규어");
+        assert_eq!(c[1], "하츠네 미쿠 넨도로이드");
         assert_eq!(c[2], "初音ミク ねんどろいど");
         let jp = query_candidates(&analyze("넨도 미쿠"), Some(Language::Japanese));
         assert_eq!(jp[0], "ねんどろいど 初音ミク");
+        assert_eq!(query_candidates(&analyze("블루 아카이브 아리스 바니걸 1/7"), None)[1], "블루 아카이브 아리스 1/7");
+        assert_eq!(query_candidates(&analyze("하츠네미쿠넨도로이드"), None)[1], "하츠네 미쿠 넨도로이드");
+        assert_eq!(query_candidates(&analyze("넨도로이드 하츠네 미쿠"), None)[1], "미쿠");
+        assert_eq!(query_candidates(&analyze("넨도로이드 2301"), None)[1], "2301");
+    }
+
+    #[test]
+    fn model_codes_match_separators_without_matching_another_model() {
+        assert!(passes("건담 RX-78-2", "HG 건담 RX782 1/144"));
+        assert!(passes("건담 RX782", "HG 건담 RX-78-2 1/144"));
+        assert!(!passes("건담 RX782", "HG 건담 RX-78-20 1/144"));
+        assert!(!passes("건담 RX782", "HG 건담 RX-78-3 1/144"));
     }
 
     #[test]

@@ -150,10 +150,10 @@ fn reads_products_linked_only_from_onclick() {
 }
 
 #[test]
-fn adult_verification_redirect_is_login_required() {
+fn adult_verification_redirect_has_its_own_status() {
     let url = "https://figuresailer.com/intro/adult_i.html?returnUrl=%2Fproduct%2Fsearch.html";
     let out = process_html("피규어세일러", detect_platform(url), &analyze("미쿠"), "미쿠", 200, url, "<html><body>성인인증</body></html>");
-    assert_eq!(out.status, PageStatus::LoginRequired);
+    assert_eq!(out.status, PageStatus::AgeVerificationRequired);
 }
 
 #[test]
@@ -188,4 +188,72 @@ fn human_verification_pages_are_blocked() {
     let url = "https://www.1004gundam.co.kr/mall/search.php?q=x";
     let page = "<body>자동등록방지를 위해 보안절차를 거치고 있습니다. Please prove that you are human.</body>";
     assert_eq!(process_html("천사건담", detect_platform(url), &analysis, "미쿠", 200, url, page).status, PageStatus::Blocked);
+}
+
+#[test]
+fn figure_search_keeps_standalone_merchandise_out_of_primary_results() {
+    let page = r#"<div class="search-result"><ul class="prdList">
+      <li><a href="/product/main/1/">넨도로이드 하츠네 미쿠 2301</a></li>
+      <li><a href="/product/keychain/2/">하츠네 미쿠 넨도로이드 플러스 러버 키 체인 단품 판매</a></li>
+      <li><a href="/product/bundle/3/">넨도로이드 하츠네 미쿠 2301 키링 특전 포함</a></li>
+      <li><a href="/product/stand/4/">넨도로이드 하츠네 미쿠 한정 스탠드(블랙)</a></li>
+      <li><a href="/product/car/5/">넨도로이드 플러스 하츠네 미쿠 큐트로디 풀백카 단품 판매</a></li>
+      <li><a href="/product/plamo/6/">넨도로이드 프라모 하츠네 미쿠</a></li>
+    </ul></div>"#;
+    let url = "https://example.kr/product/search.html?keyword=x";
+    let search = |term| process_html("A", Platform::Cafe24, &analyze(term), term, 200, url, page);
+    let figures = search("넨도로이드 하츠네 미쿠");
+    assert_eq!(figures.relevant_count(), 2);
+    assert!(figures.products.iter().any(|p| p.category == Category::Accessory && !p.relevant));
+    assert!(figures.products.iter().any(|p| p.name.contains("풀백카") && p.category == Category::Goods && !p.relevant));
+    assert!(figures.products.iter().any(|p| p.category == Category::Plamo && !p.relevant));
+    assert!(search("넨도로이드 미쿠 키체인").products.iter().any(|p| p.category == Category::Goods && p.relevant));
+    assert_eq!(search("미쿠 풀백카").relevant_count(), 1);
+}
+
+#[test]
+fn model_number_search_hides_standalone_decals_but_keeps_the_full_kit() {
+    let page = r#"<ul class="prdList">
+      <li><a href="/product/kit/1/">RG RX-78-2 건담 Ver.2.0</a></li>
+      <li><a href="/product/kit-with-decals/2/">RG RX-78-2 건담 Ver.2.0 데칼 포함</a></li>
+      <li><a href="/product/decals/3/">ガンダムデカ-ル GD84 RG RX-78-2 ガンダム用 (84)</a></li>
+    </ul>"#;
+    let url = "https://example.kr/product/search.html?keyword=x";
+    let search = |term| process_html("A", Platform::Cafe24, &analyze(term), term, 200, url, page);
+    let kits = search("RG RX-78-2");
+    assert_eq!(kits.relevant_count(), 2);
+    assert!(kits.products.iter().any(|p| p.category == Category::Accessory && !p.relevant));
+    assert!(search("RG RX-78-2 데칼").products.iter().any(|p| p.category == Category::Accessory && p.relevant));
+}
+
+#[test]
+fn explicit_listing_conditions_match_titles_and_badges() {
+    let page = r#"<ul class="prdList">
+      <li><a href="/product/new/1/">넨도로이드 하츠네 미쿠</a></li>
+      <li><a href="/product/used/2/">넨도로이드 하츠네 미쿠 2301</a><span class="badge">중고</span></li>
+      <li><a href="/product/preorder/3/">[예약] 넨도로이드 하츠네 미쿠</a></li>
+      <li><a href="/product/reissue/4/">넨도로이드 하츠네 미쿠 (재판)</a></li>
+    </ul>"#;
+    let url = "https://example.kr/product/search.html?keyword=x";
+    for (condition, expected) in [("중고", "/used/2/"), ("예약", "/preorder/3/"), ("재판", "/reissue/4/")] {
+        let term = format!("미쿠 {condition}");
+        let out = process_html("A", Platform::Cafe24, &analyze(&term), &term, 200, url, page);
+        assert_eq!(out.relevant_count(), 1, "{condition}");
+        assert!(out.products[0].url.as_ref().unwrap().ends_with(expected));
+        assert!(out.products[1..].iter().all(|p| p.missing.contains(&condition.to_string())));
+    }
+}
+
+#[test]
+fn makeshop_listing_identity_is_stable_across_searches() {
+    let url = "https://example.kr/shop/shopbrand.html?search=x";
+    let analysis = analyze("미쿠");
+    let listing = |keyword| {
+        let html = format!(r#"<a href="/shop/shopdetail.html?branduid=99&amp;search={keyword}">하츠네 미쿠</a>"#);
+        process_html("A", Platform::MakeShop, &analysis, keyword, 200, url, &html).products.remove(0)
+    };
+    let original = listing("original");
+    let fallback = listing("fallback");
+    assert_ne!(original.url, fallback.url);
+    assert_eq!(original.id, fallback.id);
 }

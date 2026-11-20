@@ -86,7 +86,11 @@ async fn search(Query(params): Query<SearchParams>) -> Sse<impl Stream<Item = Re
                 let _ = sender.send(event("store", &result));
             }),
         };
-        let _ = match search_service::search_stores(params.id, params.term, stores, hooks).await {
+        let outcome = tokio::select! {
+            _ = tx.closed() => return,
+            outcome = search_service::search_stores(params.id, params.term, stores, hooks) => outcome,
+        };
+        let _ = match outcome {
             Ok(summary) => tx.send(event("done", &summary)),
             Err(message) => tx.send(event("error", &message)),
         };

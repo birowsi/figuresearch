@@ -7,7 +7,7 @@ export type Tag = "preorder" | "used" | "bonus" | "reissue" | "bootleg";
 export type Availability = "in_stock" | "sold_out" | "unknown";
 export type PageStatus =
   | "results" | "no_relevant" | "empty" | "unparsed" | "login_required" | "rate_limited"
-  | "blocked" | "http_error" | "network_error" | "link_only" | "skipped";
+  | "blocked" | "http_error" | "network_error" | "link_only" | "age_verification_required" | "skipped";
 
 export type Product = {
   id: string;
@@ -26,6 +26,7 @@ export type Product = {
   query: string;
   /** Same for listings of the same product across stores (computed in Rust); empty if unknown. */
   groupKey: string;
+  groupTitleKey?: string;
   /** The listing itself says shipping is free. */
   freeShipping: boolean;
   /** Shipping fee for this listing (filled in from the store policy); null when unknown. */
@@ -96,14 +97,15 @@ export const statusLabels: Record<PageStatus, string> = {
   results: "결과",
   no_relevant: "맞는 상품 없음",
   empty: "결과 없음",
-  unparsed: "읽기 실패",
+  unparsed: "목록 읽기 오류",
   login_required: "로그인 필요",
+  age_verification_required: "성인 인증 후 직접 검색",
   rate_limited: "요청 제한",
-  blocked: "차단됨",
-  http_error: "오류",
-  network_error: "연결 실패",
-  link_only: "브라우저로 열기",
-  skipped: "건너뜀",
+  blocked: "자동 검색 차단",
+  http_error: "응답 오류",
+  network_error: "연결 오류",
+  link_only: "직접 검색",
+  skipped: "검색어 전송 불가",
 };
 
 export type SortKey = "relevance" | "price-asc" | "price-desc" | "store";
@@ -120,7 +122,7 @@ export const defaultFilters: ResultFilters = {
   hideSoldOut: false,
   hideUsed: false,
   showHidden: false,
-  sort: "price-asc",
+  sort: "relevance",
 };
 
 export const formatPrice = (price: number | null) => (price === null ? "가격 정보 없음" : `${price.toLocaleString("ko-KR")}원`);
@@ -135,13 +137,13 @@ function byPrice(a: Product, b: Product, direction: 1 | -1) {
 function compareProducts(a: Product, b: Product, sort: SortKey) {
   if (a.relevant !== b.relevant) return a.relevant ? -1 : 1;
   switch (sort) {
-    case "price-asc": return byPrice(a, b, 1);
-    case "price-desc": return byPrice(a, b, -1);
+    case "price-asc": return byPrice(a, b, 1) || b.relevance - a.relevance;
+    case "price-desc": return byPrice(a, b, -1) || b.relevance - a.relevance;
     case "store": return a.store.localeCompare(b.store, "ko") || b.relevance - a.relevance;
     default:
       return b.relevance - a.relevance ||
         availabilityRank[a.availability] - availabilityRank[b.availability] ||
-        byPrice(a, b, 1);
+        byPrice(a, b, 1) || a.name.localeCompare(b.name, "ko") || a.id.localeCompare(b.id);
   }
 }
 
@@ -152,6 +154,23 @@ export function sortProducts(products: Product[], sort: SortKey) {
 /** Listings with the same key are the same product; used and bootleg listings stay apart. */
 export const productKey = (p: Product) => p.groupKey || `id:${p.id}`;
 
+function comparisonKey(products: Product[]) {
+  const numberedEditions = new Map<string, string | null>();
+  for (const product of products) {
+    const { groupTitleKey, groupKey } = product;
+    if (!groupTitleKey || !groupKey || groupKey === groupTitleKey) continue;
+    const existing = numberedEditions.get(groupTitleKey);
+    numberedEditions.set(groupTitleKey, existing === undefined || existing === groupKey ? groupKey : null);
+  }
+  return (product: Product) => {
+    // A title without a number can join one known edition. Conflicting
+    // numbers stay separate, including when a result filter hides one of them.
+    const { groupTitleKey, groupKey } = product;
+    const match = groupTitleKey && groupTitleKey === groupKey ? numberedEditions.get(groupTitleKey) : null;
+    return match ?? productKey(product);
+  };
+}
+
 export type ProductGroup = {
   key: string;
   /** Cheapest available listing first, sold-out and unknown prices last. */
@@ -160,17 +179,19 @@ export type ProductGroup = {
 };
 
 const offerOrder = (a: Product, b: Product) =>
-  Number(a.availability === "sold_out") - Number(b.availability === "sold_out") || byPrice(a, b, 1);
+  Number(a.availability === "sold_out") - Number(b.availability === "sold_out") ||
+  byPrice(a, b, 1) || a.store.localeCompare(b.store, "ko") || a.id.localeCompare(b.id);
 
-export function groupProducts(products: Product[], sort: SortKey): ProductGroup[] {
+export function groupProducts(products: Product[], sort: SortKey, keyFor = comparisonKey(products)): ProductGroup[] {
   const groups = new Map<string, Product[]>();
   for (const p of products) {
-    const key = productKey(p);
-    groups.set(key, [...(groups.get(key) ?? []), p]);
+    const key = keyFor(p);
+    const offers = groups.get(key);
+    if (offers) offers.push(p); else groups.set(key, [p]);
   }
   const result = [...groups.entries()].map(([key, offers]) => {
     offers.sort(offerOrder);
-    return { key, offers, best: offers[0] };
+    return { key, offers, best: offers.find((offer) => offer.relevant) ?? offers[0] };
   });
   // Rank a group by its cheapest offer, but with the best relevance any offer has.
   const representative = (g: ProductGroup): Product => ({
@@ -195,18 +216,37 @@ export function applyFilters(products: Product[], filters: ResultFilters) {
   return sortProducts(visible, filters.sort);
 }
 
-export const applyFiltersGrouped = (products: Product[], filters: ResultFilters) =>
-  groupProducts(applyFilters(products, filters), filters.sort);
-
-export function categoryCounts(products: Product[], filters: ResultFilters) {
-  const counts = new Map<Category, number>();
-  for (const p of baseFilter(products, filters)) counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+export function applyFiltersGrouped(products: Product[], filters: ResultFilters) {
+  const base = baseFilter(products, filters);
+  const visible = filters.category === "all" ? base : base.filter((p) => p.category === filters.category);
+  return groupProducts(visible, filters.sort, comparisonKey(products));
 }
 
-export function lowestPrice(products: Product[]) {
-  const prices = products.filter((p) => p.relevant && p.price !== null && p.availability !== "sold_out").map((p) => totalPrice(p)!);
-  return prices.length ? Math.min(...prices) : null;
+export function categoryCounts(products: Product[], filters: ResultFilters) {
+  const groups = new Map<Category, Set<string>>();
+  const keys = new Set<string>();
+  const keyFor = comparisonKey(products);
+  for (const p of baseFilter(products, filters)) {
+    const key = keyFor(p);
+    keys.add(key);
+    const category = groups.get(p.category) ?? new Set<string>();
+    category.add(key);
+    groups.set(p.category, category);
+  }
+  const counts = [...groups.entries()].map(([category, items]) => [category, items.size] as const);
+  return { total: keys.size, categories: counts.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])) };
+}
+
+export function lowestOffer(products: Product[]) {
+  return products.reduce<Product | null>((best, p) => {
+    if (!p.relevant || p.price === null || p.availability === "sold_out") return best;
+    return !best || offerOrder(p, best) < 0 ? p : best;
+  }, null);
+}
+
+export function allMatchingProductsSoldOut(products: Product[]) {
+  const matches = products.filter((product) => product.relevant);
+  return matches.length > 0 && matches.every((product) => product.availability === "sold_out");
 }
 
 export const isFailure = (status: PageStatus) =>

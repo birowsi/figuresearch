@@ -5,11 +5,11 @@
 
 use encoding_rs::{EUC_KR, Encoding, UTF_8};
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue};
-use search_core::extract::{Platform, detect_platform};
+use search_core::extract::{PageSignal, Platform, detect_platform, page_signal};
 use search_core::query::{Analysis, analyze, query_candidates};
-use search_core::{Language, PageStatus, Product, RawProduct, evaluate, process_html, store_kind, url};
+use search_core::{Language, PageStatus, Product, process_html, sort_products, url};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use futures_util::future::join_all;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -169,7 +169,7 @@ pub struct Attempt {
     encoding_fallback: bool,
     duration_ms: u64,
     /// For pages that could not be read: what the store actually sent.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     page: Option<PageSummary>,
 }
 
@@ -188,7 +188,8 @@ fn summarize_page(page: &Fetched) -> PageSummary {
     let title = doc.elements().find(|&id| doc.tag(id) == Some("title")).map(|id| doc.text(id)).unwrap_or_default();
     let body = doc.elements().find(|&id| doc.tag(id) == Some("body")).unwrap_or(0);
     let text: String = doc.text(body).split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
-    PageSummary { final_url: page.final_url.clone(), bytes: page.body.len(), title: title.trim().to_string(), text }
+    let final_url = page.final_url.split('?').next().unwrap_or(&page.final_url).to_string();
+    PageSummary { final_url, bytes: page.body.len(), title: title.trim().to_string(), text }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -239,17 +240,27 @@ impl StoreResult {
 fn status_message(status: PageStatus, http_status: Option<u16>) -> Option<String> {
     Some(match status {
         PageStatus::Results => return None,
-        PageStatus::NoRelevant => "검색어와 맞는 상품이 없어요".into(),
+        PageStatus::NoRelevant => "일치 상품 없음".into(),
         PageStatus::Empty => "검색 결과 없음".into(),
-        PageStatus::Unparsed => "상품 목록을 읽지 못했어요".into(),
-        PageStatus::LoginRequired => "로그인이 필요한 페이지예요".into(),
-        PageStatus::RateLimited => "요청 제한(429) — 잠시 후 다시 시도하세요".into(),
-        PageStatus::Blocked => "자동 접근이 차단됐어요".into(),
-        PageStatus::HttpError => format!("HTTP {}", http_status.unwrap_or(0)),
+        PageStatus::Unparsed => "상품 목록을 읽을 수 없음".into(),
+        PageStatus::LoginRequired => "로그인 필요".into(),
+        PageStatus::AgeVerificationRequired => "성인 인증 후 직접 검색".into(),
+        PageStatus::RateLimited => "판매처 요청 제한 (429)".into(),
+        PageStatus::Blocked => "판매처에서 자동 검색을 차단함".into(),
+        PageStatus::HttpError => format!("판매처 응답 오류 (HTTP {})", http_status.unwrap_or(0)),
         PageStatus::NetworkError => "네트워크 오류".into(),
-        PageStatus::LinkOnly => "앱 안에서 검색할 수 없는 판매처예요. 브라우저로 열어 보세요".into(),
-        PageStatus::Skipped => "이 판매처 인코딩으로 검색어를 보낼 수 없어요".into(),
+        PageStatus::LinkOnly => "판매처에서 직접 검색".into(),
+        PageStatus::Skipped => "판매처 인코딩으로 검색어를 보낼 수 없음".into(),
     })
+}
+
+fn response_rank(status: PageStatus) -> u8 {
+    match status {
+        PageStatus::Results => 3,
+        PageStatus::NoRelevant => 2,
+        PageStatus::Empty => 1,
+        _ => 0,
+    }
 }
 
 async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, analysis: &Analysis) -> StoreResult {
@@ -260,18 +271,16 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
     if site.platform == Platform::NaverStore {
         result.status = PageStatus::LinkOnly;
         result.search_url = candidates.first().and_then(|q| encode_query(site, q)).and_then(|(enc, _)| url::fill_template(&site.url, &enc).ok());
-        result.message = status_message(PageStatus::LinkOnly, None);
+        result.message = status_message(result.status, None);
         return result;
     }
 
-    let mut best: Option<(Vec<Product>, PageStatus, Option<u16>)> = None;
-    for query in candidates.iter().take(2) {
-        let Some((encoded, encoding_fallback)) = encode_query(site, query) else {
-            if result.attempts.is_empty() && best.is_none() {
-                result.status = PageStatus::Skipped;
-            }
-            continue;
-        };
+    let mut best = None;
+    let mut found = Vec::new();
+    let encodable = candidates.iter().filter_map(|query| {
+        encode_query(site, query).map(|(encoded, fallback)| (query, encoded, fallback))
+    });
+    for (query, encoded, encoding_fallback) in encodable.take(2) {
         let target = match url::fill_template(&site.url, &encoded) {
             Ok(t) => t,
             Err(error) => {
@@ -285,23 +294,16 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
         }
         let attempt_started = Instant::now();
         let mut summary = None;
-        let (status, http_status, products) = if site.platform == Platform::Bunjang {
-            search_bunjang(site, analysis, query, &encoded).await
-        } else {
-            match fetch(&target).await {
-                Ok(page) => {
-                    let outcome = process_html(&site.name, site.platform, analysis, query, page.status, &page.final_url, &page.body);
-                    write_debug_artifact(capture_dir, search_id, site, query, &target, &page, &outcome);
-                    if is_page_failure(outcome.status) {
-                        summary = Some(summarize_page(&page));
-                    }
-                    (outcome.status, Some(page.status), outcome.products)
+        let (status, http_status, products, network_error) = match fetch(&target).await {
+            Ok(page) => {
+                let outcome = process_html(&site.name, site.platform, analysis, query, page.status, &page.final_url, &page.body);
+                write_debug_artifact(capture_dir, search_id, site, query, &target, &page, &outcome);
+                if is_page_failure(outcome.status) {
+                    summary = Some(summarize_page(&page));
                 }
-                Err(error) => {
-                    result.message = Some(error);
-                    (PageStatus::NetworkError, None, vec![])
-                }
+                (outcome.status, Some(page.status), outcome.products, None)
             }
+            Err(error) => (PageStatus::NetworkError, None, vec![], Some(error)),
         };
         let relevant = products.iter().filter(|p| p.relevant).count();
         result.attempts.push(Attempt {
@@ -315,91 +317,26 @@ async fn search_store(capture_dir: Option<&Path>, search_id: &str, site: &Site, 
             duration_ms: attempt_started.elapsed().as_millis() as u64,
             page: summary,
         });
-        let better = best.as_ref().is_none_or(|(b, _, _)| relevant > b.iter().filter(|p| p.relevant).count() || (relevant == 0 && b.is_empty() && !products.is_empty()));
-        if better {
-            best = Some((products, status, http_status));
+        if best.is_none_or(|previous| response_rank(status) > response_rank(previous)) {
+            best = Some(status);
+            result.message = network_error.or_else(|| status_message(status, http_status));
         }
+        found.extend(products);
         if !status.worth_retry() {
             break;
         }
     }
 
-    if let Some((products, status, http_status)) = best {
-        result.status = status;
-        result.set_products(products);
-        // Keep the concrete network error text; otherwise describe the status.
-        if status != PageStatus::NetworkError || result.message.is_none() {
-            result.message = status_message(status, http_status);
-        }
-    } else if result.message.is_none() {
+    result.status = best.unwrap_or(PageStatus::Skipped);
+    if best.is_none() {
         result.message = status_message(result.status, None);
     }
+    sort_products(&mut found);
+    let mut seen = HashSet::new();
+    found.retain(|product| seen.insert(product.id.clone()));
+    result.set_products(found);
     result.duration_ms = started.elapsed().as_millis() as u64;
     result
-}
-
-// ---------------------------------------------------------------- bunjang
-
-#[derive(Deserialize)]
-struct BunjangResponse {
-    #[serde(default)]
-    list: Vec<serde_json::Value>,
-}
-
-fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
-    match value.get(key)? {
-        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        _ => None,
-    }
-}
-
-fn bunjang_products(body: &str) -> Result<Vec<RawProduct>, String> {
-    let response: BunjangResponse = serde_json::from_str(body).map_err(|e| format!("번개장터 응답 해석 실패: {e}"))?;
-    Ok(response
-        .list
-        .iter()
-        .filter(|item| !item.get("ad").and_then(|v| v.as_bool()).unwrap_or(false))
-        .filter_map(|item| {
-            let pid = json_string(item, "pid")?;
-            let name = json_string(item, "name")?;
-            let price = json_string(item, "price").and_then(|p| p.replace(',', "").parse::<u64>().ok()).filter(|p| *p > 0);
-            let image = json_string(item, "product_image").map(|i| i.replace("{res}", "360").replace("{cnt}", "1"));
-            let status = json_string(item, "status");
-            Some(RawProduct {
-                name,
-                url: Some(format!("https://m.bunjang.co.kr/products/{pid}")),
-                price,
-                image,
-                sold_out: status.is_some_and(|s| s != "0"),
-                badges: String::new(),
-            })
-        })
-        .collect())
-}
-
-async fn search_bunjang(site: &Site, analysis: &Analysis, query: &str, encoded: &str) -> (PageStatus, Option<u16>, Vec<Product>) {
-    let api = format!("https://api.bunjang.co.kr/api/1/find_v2.json?q={encoded}&order=score&page=0&n=60&stat_device=w&version=4");
-    match fetch(&api).await {
-        Ok(page) if page.status == 429 => (PageStatus::RateLimited, Some(429), vec![]),
-        Ok(page) if page.status >= 400 => (PageStatus::HttpError, Some(page.status), vec![]),
-        Ok(page) => match bunjang_products(&page.body) {
-            Ok(raws) if raws.is_empty() => (PageStatus::Empty, Some(page.status), vec![]),
-            Ok(raws) => {
-                let products = evaluate(&site.name, query, analysis, raws, store_kind(Platform::Bunjang));
-                let status = if products.iter().any(|p| p.relevant) { PageStatus::Results } else { PageStatus::NoRelevant };
-                (status, Some(page.status), products)
-            }
-            Err(error) => {
-                log::warn!("{error}");
-                (PageStatus::Unparsed, Some(page.status), vec![])
-            }
-        },
-        Err(error) => {
-            log::warn!("bunjang: {error}");
-            (PageStatus::NetworkError, None, vec![])
-        }
-    }
 }
 
 // ---------------------------------------------------------------- debug capture
@@ -571,17 +508,30 @@ pub async fn check_sites() -> HashMap<String, SiteCheck> {
         let mut out = Vec::new();
         for site in group {
             let check = if site.platform == Platform::NaverStore {
-                SiteCheck { ok: true, status: None, detail: "브라우저로 열기".into() }
+                SiteCheck { ok: true, status: None, detail: "판매처에서 직접 검색".into() }
             } else {
                 let target = encode_query(&site, "figure").and_then(|(q, _)| url::fill_template(&site.url, &q).ok());
                 match target {
                     None => SiteCheck { ok: false, status: None, detail: "URL 설정 오류".into() },
                     Some(target) => match fetch(&target).await {
-                        Ok(page) => SiteCheck {
-                            ok: page.status < 400 || page.status == 429,
-                            status: Some(page.status),
-                            detail: if page.status == 429 { "요청 제한".into() } else { "응답 수신".into() },
-                        },
+                        Ok(page) => {
+                            let state = match page.status {
+                                429 => Some(PageStatus::RateLimited),
+                                401 | 403 => Some(PageStatus::Blocked),
+                                204 | 400.. => Some(PageStatus::HttpError),
+                                _ => match page_signal(&search_core::html::Document::parse(&page.body), &page.final_url) {
+                                    PageSignal::BotChallenge => Some(PageStatus::Blocked),
+                                    PageSignal::LoginPage => Some(PageStatus::LoginRequired),
+                                    PageSignal::AgeVerification => Some(PageStatus::AgeVerificationRequired),
+                                    _ => None,
+                                },
+                            };
+                            SiteCheck {
+                                ok: state.is_none(),
+                                status: Some(page.status),
+                                detail: state.and_then(|status| status_message(status, Some(page.status))).unwrap_or_else(|| "응답 수신".into()),
+                            }
+                        }
                         Err(error) => SiteCheck { ok: false, status: None, detail: error },
                     },
                 }
@@ -617,20 +567,5 @@ mod tests {
         let mut skip = site.clone();
         skip.profile.euc_kr_fallback = Some("skip".into());
         assert_eq!(encode_query(&skip, "미쿠 🎉"), None);
-    }
-
-    #[test]
-    fn parses_bunjang_payload() {
-        let body = r#"{"list":[
-            {"pid":"301","name":"넨도로이드 하츠네 미쿠 미개봉","price":"45000","product_image":"https://media.bunjang.co.kr/product/301_{cnt}_1_w{res}.jpg","status":"0"},
-            {"pid":302,"name":"광고 상품","price":"1000","ad":true},
-            {"pid":"303","name":"figma 미쿠","price":"30000","status":"3"}
-        ]}"#;
-        let products = bunjang_products(body).unwrap();
-        assert_eq!(products.len(), 2);
-        assert_eq!(products[0].url.as_deref(), Some("https://m.bunjang.co.kr/products/301"));
-        assert_eq!(products[0].price, Some(45000));
-        assert_eq!(products[0].image.as_deref(), Some("https://media.bunjang.co.kr/product/301_1_1_w360.jpg"));
-        assert!(products[1].sold_out);
     }
 }

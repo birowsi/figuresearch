@@ -95,7 +95,14 @@ fn scale_denominator(key: &str) -> Option<u32> {
 const ACCESSORY: &[&str] = &[
     "넨도로이드 모어", "nendoroid more", "ねんどろいどもあ", "전용 케이스", "디스플레이 케이스",
     "아크릴 케이스", "보호 케이스", "교체 파츠", "교체용", "부품", "거치대", "figma 전용", "액션 베이스",
-    "action base", "더미 박스", "스탠드 베이스",
+    "action base", "더미 박스", "스탠드 베이스", "한정 스탠드",
+];
+const DECALS: &[&str] = &["데칼", "デカール", "デカ-ル", "decal", "decals"];
+const STANDALONE_GOODS: &[&str] = &[
+    "아크릴 스탠드", "아크스탠드", "키링", "키체인", "키 체인", "키홀더", "열쇠고리", "핀 배지", "캔뱃지",
+    "러버 마스코트", "keychain", "key chain", "acrylic stand", "rubber mascot",
+    "アクリルスタンド", "キーホルダー", "ラバーマスコット", "풀백카", "풀백 카", "pullback car",
+    "pull back car", "プルバックカー",
 ];
 const BOOK_WORDS: &[&str] = &[
     "코믹스", "만화", "소설", "라이트노벨", "단행본", "画集", "아트북", "artbook", "art book", "설정집",
@@ -107,7 +114,7 @@ const NENDO: &[&str] = &["넨도로이드", "ねんどろいど", "nendoroid", "
 const FIGMA: &[&str] = &["figma", "피그마"];
 const POP_UP: &[&str] = &["팝업 퍼레이드", "팝업퍼레이드", "pop up parade", "popupparade", "ポップアップパレード"];
 const PLAMO: &[&str] = &[
-    "프라모델", "건프라", "プラモデル", "plastic model", "plamo", "모데로이드", "moderoid", "피규어라이즈",
+    "프라모", "건프라", "プラモデル", "plastic model", "plamo", "모데로이드", "moderoid", "피규어라이즈",
     "figure-rise", "figure rise", "30ms", "30mm", "hguc", "mgsd", "mgex", "re/100", "엔트리 그레이드",
     "entry grade", "조립식", "프라키트", "plakit",
 ];
@@ -151,11 +158,21 @@ pub fn classify(name: &str, badges: &str, store: StoreKind) -> Classification {
     let key = match_key(name);
     let badge_key = match_key(badges);
     let both = format!("{key} {badge_key}");
+    let bundled_goods = has_any(&key, &["특전 포함", "특전포함", "동봉", "증정", "with bonus"]);
+    let bundled_decals = bundled_goods || has_any(&key, &["데칼 포함", "데칼포함", "デカール付属", "decals included"]);
+    let gundam_model = || has_any(&key, &["건담", "gundam", "ガンダム", "자쿠", "zaku"])
+        || key.split_whitespace().any(|token| token.strip_prefix("rx").is_some_and(|suffix| {
+            suffix.bytes().all(|byte| byte.is_ascii_digit())
+        }));
 
-    let category = if has_any(&key, ACCESSORY) {
+    let category = if has_any(&key, ACCESSORY) || (!bundled_decals && has_any(&key, DECALS)) {
         Category::Accessory
+    } else if !bundled_goods && has_any(&key, STANDALONE_GOODS) {
+        Category::Goods
     } else if has_any(&key, KUJI) {
         Category::Kuji
+    } else if has_any(&key, PLAMO) {
+        Category::Plamo
     } else if has_any(&key, NENDO_DOLL) {
         Category::NendoroidDoll
     } else if has_any(&key, NENDO) {
@@ -164,9 +181,8 @@ pub fn classify(name: &str, badges: &str, store: StoreKind) -> Classification {
         Category::Figma
     } else if has_any(&key, POP_UP) {
         Category::PopUpParade
-    } else if has_any(&key, PLAMO)
-        || (has_any(&key, PLAMO_GRADES) && (has_any(&key, &["건담", "gundam", "ガンダム", "자쿠", "zaku"]) || scale_denominator(&key).is_some_and(|d| d >= 60)))
-        || scale_denominator(&key).is_some_and(|d| d >= 35)
+    } else if scale_denominator(&key).is_some_and(|d| d >= 35)
+        || (has_any(&key, PLAMO_GRADES) && gundam_model())
     {
         Category::Plamo
     } else if has_any(&key, ACTION) {

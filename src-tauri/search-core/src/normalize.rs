@@ -74,6 +74,15 @@ fn is_word_char(c: char) -> bool {
 /// Matching form: lowercase, katakana-folded, punctuation as spaces.
 /// A `/` between digits is kept so scales such as `1/7` survive.
 pub fn match_key(input: &str) -> String {
+    match_key_inner(input, false)
+}
+
+/// Product grouping needs to keep versions such as 2.0 distinct from 20.
+pub(crate) fn grouping_title_key(input: &str) -> String {
+    match_key_inner(input, true)
+}
+
+fn match_key_inner(input: &str, preserve_decimals: bool) -> String {
     let folded = fold_width(input).to_lowercase();
     let mut out = String::with_capacity(folded.len());
     let chars: Vec<char> = folded.chars().collect();
@@ -83,6 +92,10 @@ pub fn match_key(input: &str) -> String {
             let digit_before = i > 0 && chars[i - 1].is_ascii_digit();
             let digit_after = chars.get(i + 1).is_some_and(|n| n.is_ascii_digit());
             out.push(if digit_before && digit_after { '/' } else { ' ' });
+        } else if preserve_decimals && c == '.' && i > 0
+            && chars[i - 1].is_ascii_digit() && chars.get(i + 1).is_some_and(char::is_ascii_digit)
+        {
+            out.push(c);
         } else if c == '.' && i > 0 && chars[i - 1].is_alphabetic() && chars.get(i + 1).is_some_and(|n| n.is_alphabetic()) {
             // "s.h.figuarts" -> "shfiguarts"
         } else if is_word_char(c) {
